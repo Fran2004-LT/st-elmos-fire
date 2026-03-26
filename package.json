@@ -1,7 +1,12 @@
 {
-  "name": "umaroll",
-  "version": "1.0.0",
+  "name": "umaroll-pro",
+  "version": "2.1.0",
+  "description": "Discord dice roller with CSPRNG, kh/kl, adv/dis, tags, and deploy-ready safeguards.",
   "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node index.js"
   },
