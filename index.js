@@ -211,20 +211,20 @@ function buildRollEmbed(parsed, tokens, username) {
 // ══════════════════════════════════════════════
 //  ECONOMY HELPERS
 // ══════════════════════════════════════════════
-function applyWin(p, amount) {
+function applyWin(userId, amount) {
+  const p = getPlayer(userId);
   if (p.win_today >= WIN_CAP) return { ok: false, reason: `ถึง Daily Win Cap แล้วครับ (${WIN_CAP.toLocaleString()}/วัน)` };
   const actual = Math.min(amount, WIN_CAP - p.win_today);
   const taxed = Math.floor(actual * (1 - TAX));
-  updatePlayer(p.user_id, { gold: p.gold + taxed, win_today: p.win_today + actual });
-  p.gold += taxed; p.win_today += actual;
-  return { ok: true, taxed, actual };
+  updatePlayer(userId, { gold: p.gold + taxed, win_today: p.win_today + actual });
+  return { ok: true, taxed, actual, gold: p.gold + taxed };
 }
 
-function applyLoss(p, amount) {
+function applyLoss(userId, amount) {
+  const p = getPlayer(userId);
   if (p.gold < amount) return { ok: false, reason: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})` };
-  updatePlayer(p.user_id, { gold: p.gold - amount });
-  p.gold -= amount;
-  return { ok: true };
+  updatePlayer(userId, { gold: p.gold - amount });
+  return { ok: true, gold: p.gold - amount };
 }
 
 function isStaff(member) {
@@ -395,6 +395,8 @@ async function handleSlash(interaction) {
     if (reward.type === 'rc')   { updates.rc   = p.rc   + reward.amount; }
     if (reward.type === 'item' && reward.item === 'reroll') { updates.inv_reroll = p.inv_reroll + 1; }
     updatePlayer(userId, updates);
+    // re-fetch to confirm
+    const pAfter = getPlayer(userId);
     const labels = ['🪙 200 Gold','🪙 400 Gold','🪙 600 Gold','🪙 800 Gold','🪙 1,000 Gold','🌈 50 RC','🎲 Re-roll x1'];
     const bar = Array.from({length:7}, (_,i) => i < streak ? '⭐' : '☆').join(' ');
     const nextInfo = streak < 7 ? `\n\nพรุ่งนี้: ${labels[streak]}` : '\n\n🎉 ครบ 7 วัน! Streak รีเซ็ต';
@@ -426,8 +428,9 @@ async function handleSlash(interaction) {
     if (p.gold < amount) return interaction.reply({ content: `❌ Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, ephemeral: true });
     const rc = amount / EXCHANGE_RATE;
     updatePlayer(userId, { gold: p.gold - amount, rc: p.rc + rc });
+    const pConv = getPlayer(userId);
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff).setTitle('🔄 แลกเงิน')
-      .setDescription(`🪙 -${amount.toLocaleString()} Gold → 🌈 +${rc.toLocaleString()} RC\n\nGold เหลือ: **${(p.gold - amount).toLocaleString()}**\nRC ทั้งหมด: **${(p.rc + rc).toLocaleString()}**`)] });
+      .setDescription(`🪙 -${amount.toLocaleString()} Gold → 🌈 +${rc.toLocaleString()} RC\n\nGold เหลือ: **${pConv.gold.toLocaleString()}**\nRC ทั้งหมด: **${pConv.rc.toLocaleString()}**`)] });
   }
 
   // /use
@@ -448,18 +451,18 @@ async function handleSlash(interaction) {
     if (p.win_today >= WIN_CAP) return interaction.reply({ content: `❌ ถึง Daily Win Cap แล้วครับ (${WIN_CAP.toLocaleString()}/วัน)`, ephemeral: true });
     const amount = interaction.options.getInteger('amount');
     const choice = interaction.options.getString('choice');
-    const loss = applyLoss(p, amount);
-    if (!loss.ok) return interaction.reply({ content: `❌ ${loss.reason}`, ephemeral: true });
+    const lossResult = applyLoss(userId, amount);
+    if (!lossResult.ok) return interaction.reply({ content: `❌ ${lossResult.reason}`, ephemeral: true });
     const win = randF() < 0.45;
     const result = win ? choice : (choice === 'heads' ? 'tails' : 'heads');
     const emoji = result === 'heads' ? '🟡' : '⚫';
     if (win) {
-      const w = applyWin(p, amount);
+      const w = applyWin(userId, amount);
       return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle(`${emoji} Coinflip — ชนะ!`)
-        .setDescription(`ผล: **${result.toUpperCase()}** ✅\n\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${p.gold.toLocaleString()} 🪙**`)] });
+        .setDescription(`ผล: **${result.toUpperCase()}** ✅\n\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} 🪙**`)] });
     } else {
       return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle(`${emoji} Coinflip — แพ้`)
-        .setDescription(`ผล: **${result.toUpperCase()}** ❌\n\n-${amount.toLocaleString()} Gold\nยอดรวม: **${p.gold.toLocaleString()} 🪙**`)] });
+        .setDescription(`ผล: **${result.toUpperCase()}** ❌\n\n-${amount.toLocaleString()} Gold\nยอดรวม: **${lossResult.gold.toLocaleString()} 🪙**`)] });
     }
   }
 
@@ -468,8 +471,8 @@ async function handleSlash(interaction) {
     const p = getPlayer(userId);
     if (p.win_today >= WIN_CAP) return interaction.reply({ content: `❌ ถึง Daily Win Cap แล้วครับ`, ephemeral: true });
     const amount = interaction.options.getInteger('amount');
-    const loss = applyLoss(p, amount);
-    if (!loss.ok) return interaction.reply({ content: `❌ ${loss.reason}`, ephemeral: true });
+    const lossR = applyLoss(userId, amount);
+    if (!lossR.ok) return interaction.reply({ content: `❌ ${lossR.reason}`, ephemeral: true });
 
     const contrib = Math.floor(amount * POOL_CONTRIB);
     setPool(getPool() + contrib);
@@ -487,20 +490,22 @@ async function handleSlash(interaction) {
       const jpAmt = pool * JACKPOT_MULT;
       const taxed = Math.floor(jpAmt * (1 - TAX));
       setPool(0);
-      updatePlayer(userId, { gold: p.gold + taxed, win_today: Math.min(p.win_today + jpAmt, WIN_CAP) });
+      const pFresh = getPlayer(userId);
+      updatePlayer(userId, { gold: pFresh.gold + taxed, win_today: Math.min(pFresh.win_today + jpAmt, WIN_CAP) });
+      const pJP = getPlayer(userId);
       return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('🎰 JACKPOT!!!')
-        .setDescription(`${reelStr}\n\n🎊 **7️⃣ 7️⃣ 7️⃣ — JACKPOT!**\nPool: ${pool.toLocaleString()} × ${JACKPOT_MULT}\nหัก Tax 3% → **+${taxed.toLocaleString()} Gold**\nยอดรวม: **${(p.gold + taxed).toLocaleString()} 🪙**`)] });
+        .setDescription(`${reelStr}\n\n🎊 **7️⃣ 7️⃣ 7️⃣ — JACKPOT!**\nPool: ${pool.toLocaleString()} × ${JACKPOT_MULT}\nหัก Tax 3% → **+${taxed.toLocaleString()} Gold**\nยอดรวม: **${pJP.gold.toLocaleString()} 🪙**`)] });
     }
 
     if (forceWin) {
       const mult = reels[0] === '💎' ? 10 : reels[0] === '⭐' ? 5 : 3;
-      const w = applyWin(p, amount * mult);
+      const w = applyWin(userId, amount * mult);
       return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🎰 Slots — ชนะ!')
-        .setDescription(`${reelStr}\n\n**${reels[0]}${reels[0]}${reels[0]} — ${mult}x!**\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${p.gold.toLocaleString()} 🪙**`)] });
+        .setDescription(`${reelStr}\n\n**${reels[0]}${reels[0]}${reels[0]} — ${mult}x!**\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} 🪙**`)] });
     }
 
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🎰 Slots')
-      .setDescription(`${reelStr}\n\nไม่ match — -${amount.toLocaleString()} Gold\n(${contrib} เข้า Jackpot Pool)\nPool ปัจจุบัน: ${getPool().toLocaleString()}\nยอดรวม: **${p.gold.toLocaleString()} 🪙**`)] });
+      .setDescription(`${reelStr}\n\nไม่ match — -${amount.toLocaleString()} Gold\n(${contrib} เข้า Jackpot Pool)\nPool ปัจจุบัน: ${getPool().toLocaleString()}\nยอดรวม: **${lossR.gold.toLocaleString()} 🪙**`)] });
   }
 
   // /blackjack
@@ -509,17 +514,17 @@ async function handleSlash(interaction) {
     if (p.win_today >= WIN_CAP) return interaction.reply({ content: `❌ ถึง Daily Win Cap แล้วครับ`, ephemeral: true });
     if (bjGames.has(userId)) return interaction.reply({ content: '❌ มีเกม Blackjack ค้างอยู่ครับ', ephemeral: true });
     const amount = interaction.options.getInteger('amount');
-    const loss = applyLoss(p, amount);
-    if (!loss.ok) return interaction.reply({ content: `❌ ${loss.reason}`, ephemeral: true });
+    const bjLoss = applyLoss(userId, amount);
+    if (!bjLoss.ok) return interaction.reply({ content: `❌ ${bjLoss.reason}`, ephemeral: true });
 
     const deck = makeDeck();
     const game = { amount, deck, player: [deck.pop(), deck.pop()], dealer: [deck.pop(), deck.pop()], userId };
     const pv = handVal(game.player);
 
     if (pv === 21) {
-      const w = applyWin(p, Math.floor(amount * 2.5));
+      const w = applyWin(userId, Math.floor(amount * 2.5));
       return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🃏 BLACKJACK! 21!')
-        .setDescription(`ไพ่คุณ: ${game.player.map(c => cardStr(c)).join(' ')}\n\n**BLACKJACK! ชนะ 2.5x!**\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${p.gold.toLocaleString()} 🪙**`)] });
+        .setDescription(`ไพ่คุณ: ${game.player.map(c => cardStr(c)).join(' ')}\n\n**BLACKJACK! ชนะ 2.5x!**\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} 🪙**`)] });
     }
 
     bjGames.set(userId, game);
@@ -540,20 +545,20 @@ async function handleSlash(interaction) {
     const validBets = ['red','black','odd','even','1-18','19-36'];
     const isNumBet = !isNaN(parseInt(bet)) && parseInt(bet) >= 0 && parseInt(bet) <= 36;
     if (!validBets.includes(bet) && !isNumBet) return interaction.reply({ content: '❌ bet ไม่ถูกต้องครับ\nตัวเลือก: red, black, odd, even, 1-18, 19-36 หรือตัวเลข 0-36', ephemeral: true });
-    const loss = applyLoss(p, amount);
-    if (!loss.ok) return interaction.reply({ content: `❌ ${loss.reason}`, ephemeral: true });
+    const rlLoss = applyLoss(userId, amount);
+    if (!rlLoss.ok) return interaction.reply({ content: `❌ ${rlLoss.reason}`, ephemeral: true });
     const n = rand(0, 36);
     const color = roulColor(n);
     const colorEmoji = color === 'red' ? '🔴' : color === 'black' ? '⚫' : '🟢';
     const win = roulWin(bet, n);
     const pay = roulPay(bet);
     if (win) {
-      const w = applyWin(p, amount * pay);
+      const w = applyWin(userId, amount * pay);
       return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🎡 Roulette — ชนะ!')
-        .setDescription(`ลูกหยุดที่: **${n}** ${colorEmoji}\nเดิมพัน: **${bet}** (${pay}x)\n\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${p.gold.toLocaleString()} 🪙**`)] });
+        .setDescription(`ลูกหยุดที่: **${n}** ${colorEmoji}\nเดิมพัน: **${bet}** (${pay}x)\n\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} 🪙**`)] });
     }
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🎡 Roulette — แพ้')
-      .setDescription(`ลูกหยุดที่: **${n}** ${colorEmoji}\nเดิมพัน: **${bet}**\n\n-${amount.toLocaleString()} Gold\nยอดรวม: **${p.gold.toLocaleString()} 🪙**`)] });
+      .setDescription(`ลูกหยุดที่: **${n}** ${colorEmoji}\nเดิมพัน: **${bet}**\n\n-${amount.toLocaleString()} Gold\nยอดรวม: **${rlLoss.gold.toLocaleString()} 🪙**`)] });
   }
 
   // /give (Staff)
@@ -600,8 +605,9 @@ async function handleButton(interaction) {
     const pv = handVal(game.player);
     if (pv > 21) {
       bjGames.delete(userId);
+      const pBust = getPlayer(userId);
       return interaction.update({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🃏 Blackjack — แพ้ (Bust)')
-        .setDescription(`ไพ่คุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\n**เกิน 21!** -${game.amount.toLocaleString()} Gold\nยอดรวม: **${p.gold.toLocaleString()} 🪙**`)], components: [] });
+        .setDescription(`ไพ่คุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\n**เกิน 21!** -${game.amount.toLocaleString()} Gold\nยอดรวม: **${pBust.gold.toLocaleString()} 🪙**`)], components: [] });
     }
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`bj_hit_${userId}`).setLabel('🃏 Hit').setStyle(ButtonStyle.Success),
@@ -616,17 +622,20 @@ async function handleButton(interaction) {
     while (handVal(game.dealer) < 17) game.dealer.push(game.deck.pop());
     const pv = handVal(game.player), dv = handVal(game.dealer);
     if (dv > 21 || pv > dv) {
-      const w = applyWin(p, game.amount * 2);
+      const w = applyWin(userId, game.amount * 2);
       return interaction.update({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🃏 Blackjack — ชนะ!')
-        .setDescription(`Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${p.gold.toLocaleString()} 🪙**`)], components: [] });
+        .setDescription(`Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} 🪙**`)], components: [] });
     }
     if (pv === dv) {
-      updatePlayer(userId, { gold: p.gold + game.amount });
+      const pTie = getPlayer(userId);
+      updatePlayer(userId, { gold: pTie.gold + game.amount });
+      const pTieAfter = getPlayer(userId);
       return interaction.update({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('🃏 Blackjack — เสมอ')
-        .setDescription(`Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\nคืนเงิน ${game.amount.toLocaleString()} Gold`)], components: [] });
+        .setDescription(`Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\nคืนเงิน ${game.amount.toLocaleString()} Gold\nยอดรวม: **${pTieAfter.gold.toLocaleString()} 🪙**`)], components: [] });
     }
+    const pLose = getPlayer(userId);
     return interaction.update({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🃏 Blackjack — แพ้')
-      .setDescription(`Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\n-${game.amount.toLocaleString()} Gold\nยอดรวม: **${p.gold.toLocaleString()} 🪙**`)], components: [] });
+      .setDescription(`Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\n-${game.amount.toLocaleString()} Gold\nยอดรวม: **${pLose.gold.toLocaleString()} 🪙**`)], components: [] });
   }
 }
 
