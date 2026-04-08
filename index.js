@@ -61,13 +61,25 @@ db.exec(`
   INSERT OR IGNORE INTO jackpot (id, pool) VALUES (1, 0);
 `);
 
+// คืน string วันปัจจุบันโดยนับตี 4 ไทย (UTC+7) เป็นจุดเริ่มต้นวันใหม่
+function getDayKey() {
+  // UTC+7 = +420 นาที, reset ที่ 04:00 ICT = 21:00 UTC วันก่อน
+  const now = new Date();
+  const ict = new Date(now.getTime() + 7 * 60 * 60 * 1000); // shift to ICT
+  // ถ้ายังไม่ถึง 04:00 ICT ให้ถือว่าเป็น "วันก่อน"
+  if (ict.getUTCHours() < 4) {
+    ict.setUTCDate(ict.getUTCDate() - 1);
+  }
+  return ict.toUTCString().slice(0, 16); // "Mon, 07 Apr 2026"
+}
+
 function getPlayer(userId) {
   let p = db.prepare('SELECT * FROM players WHERE user_id = ?').get(userId);
   if (!p) {
     db.prepare('INSERT INTO players (user_id) VALUES (?)').run(userId);
     p = db.prepare('SELECT * FROM players WHERE user_id = ?').get(userId);
   }
-  const today = new Date().toDateString();
+  const today = getDayKey();
   if (p.last_win_reset !== today) {
     db.prepare('UPDATE players SET win_today = 0, last_win_reset = ? WHERE user_id = ?').run(today, userId);
     p.win_today = 0;
@@ -212,12 +224,18 @@ function buildRollEmbed(parsed, tokens, username) {
 //  ECONOMY HELPERS
 // ══════════════════════════════════════════════
 function applyWin(userId, amount) {
-  const p = getPlayer(userId);
+  const p = getPlayer(userId); // fresh fetch หลัง applyLoss แล้ว
   if (p.win_today >= WIN_CAP) return { ok: false, reason: `ถึง Daily Win Cap แล้วครับ (${WIN_CAP.toLocaleString()}/วัน)` };
   const actual = Math.min(amount, WIN_CAP - p.win_today);
   const taxed = Math.floor(actual * (1 - TAX));
-  updatePlayer(userId, { gold: p.gold + taxed, win_today: p.win_today + actual });
-  return { ok: true, taxed, actual, gold: p.gold + taxed };
+  // p.gold ตอนนี้คือยอดหลัง applyLoss หักไปแล้ว
+  // ต้องบวกเงินเดิมพันคืน + กำไร (taxed = winAmount - tax)
+  // เช่น เดิมพัน 500, ชนะ 2x: ได้คืน 500 + กำไร 485 = 985
+  // แต่ p.gold ตอนนี้ถูกหัก 500 ไปแล้ว ดังนั้นบวกแค่ taxed ไม่พอ
+  // ต้องบวก amount (เงินเดิมพันที่หักไปแล้ว) + taxed (กำไรสุทธิ)
+  const netGain = amount + taxed; // คืนเงินเดิมพัน + กำไร
+  updatePlayer(userId, { gold: p.gold + netGain, win_today: p.win_today + actual });
+  return { ok: true, taxed, actual, gold: p.gold + netGain };
 }
 
 function applyLoss(userId, amount) {
@@ -322,6 +340,30 @@ const commands = [
     .addStringOption(o => o.setName('item').setDescription('ไอเทม').setRequired(true)
       .addChoices({ name: '🎲 Re-roll', value: 'reroll' }))
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน').setRequired(true).setMinValue(1)),
+
+  new SlashCommandBuilder().setName('inspect').setDescription('[Staff] ดู inventory ของสมาชิก')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addUserOption(o => o.setName('user').setDescription('ผู้เล่น').setRequired(true)),
+
+  new SlashCommandBuilder().setName('take').setDescription('[Staff] ลบเงินออกจากสมาชิก')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addUserOption(o => o.setName('user').setDescription('ผู้เล่น').setRequired(true))
+    .addStringOption(o => o.setName('currency').setDescription('สกุลเงิน').setRequired(true)
+      .addChoices({ name: '🪙 Gold', value: 'gold' }, { name: '🌈 Rainbow Carrot', value: 'rc' }))
+    .addIntegerOption(o => o.setName('amount').setDescription('จำนวน').setRequired(true).setMinValue(1)),
+
+  new SlashCommandBuilder().setName('revoke').setDescription('[Staff] ลบไอเทมออกจากสมาชิก')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addUserOption(o => o.setName('user').setDescription('ผู้เล่น').setRequired(true))
+    .addStringOption(o => o.setName('item').setDescription('ไอเทม').setRequired(true)
+      .addChoices({ name: '🎲 Re-roll', value: 'reroll' }))
+    .addIntegerOption(o => o.setName('amount').setDescription('จำนวน').setRequired(true).setMinValue(1)),
+
+  new SlashCommandBuilder().setName('transfer').setDescription('โอน Gold ให้สมาชิก (RC โอนไม่ได้)')
+    .addUserOption(o => o.setName('user').setDescription('ผู้รับ').setRequired(true))
+    .addIntegerOption(o => o.setName('amount').setDescription('จำนวน Gold').setRequired(true).setMinValue(1)),
+
+  new SlashCommandBuilder().setName('help').setDescription('ดูคำสั่งทั้งหมด'),
 ].map(c => c.toJSON());
 
 async function deployCommands() {
@@ -383,12 +425,15 @@ async function handleSlash(interaction) {
   // /daily
   if (cmd === 'daily') {
     const p = getPlayer(userId);
-    const today = new Date().toDateString();
+    const today = getDayKey();
     if (p.last_daily === today) {
       return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('📅 Daily').setDescription('รับแล้ววันนี้ครับ มาใหม่พรุ่งนี้! 🌙')], ephemeral: true });
     }
-    const yest = new Date(); yest.setDate(yest.getDate() - 1);
-    const streak = p.last_daily === yest.toDateString() ? (p.streak % 7) + 1 : 1;
+    const yest = new Date(new Date().getTime() + 7*60*60*1000);
+    if (yest.getUTCHours() < 4) yest.setUTCDate(yest.getUTCDate() - 1);
+    yest.setUTCDate(yest.getUTCDate() - 1);
+    const yestKey = yest.toUTCString().slice(0, 16);
+    const streak = p.last_daily === yestKey ? (p.streak % 7) + 1 : 1;
     const reward = DAILY_REWARDS[streak - 1];
     const updates = { streak, last_daily: today };
     if (reward.type === 'gold') { updates.gold = p.gold + reward.amount; }
@@ -585,6 +630,106 @@ async function handleSlash(interaction) {
     if (item === 'reroll') updatePlayer(target.id, { inv_reroll: tp.inv_reroll + amount });
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff).setTitle('🎁 แจกไอเทม')
       .setDescription(`แจก **🎲 Re-roll x${amount}** ให้ <@${target.id}> แล้วครับ`)] });
+  }
+
+  // /inspect (Staff)
+  if (cmd === 'inspect') {
+    if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ Staff เท่านั้นครับ', ephemeral: true });
+    const target = interaction.options.getUser('user');
+    const tp = getPlayer(target.id);
+    const pool = getPool();
+    const bar = Array.from({length:7}, (_,i) => i < tp.streak ? '⭐' : '☆').join(' ');
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xffa500).setTitle(`🔍 [Staff] Inventory ของ ${target.username}`)
+      .addFields(
+        { name: '💰 ยอดเงิน', value: `🪙 Gold: **${tp.gold.toLocaleString()}**
+🌈 RC: **${tp.rc.toLocaleString()}**
+📊 ชนะวันนี้: ${tp.win_today.toLocaleString()}/${WIN_CAP.toLocaleString()}`, inline: true },
+        { name: '🎒 Items', value: `🎲 Re-roll: **x${tp.inv_reroll}**`, inline: true },
+        { name: '📅 Daily Streak', value: `${bar}
+${tp.streak}/7 วัน
+รับล่าสุด: ${tp.last_daily || 'ยังไม่เคย'}`, inline: false },
+      )], ephemeral: true });
+  }
+
+  // /take (Staff)
+  if (cmd === 'take') {
+    if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ Staff เท่านั้นครับ', ephemeral: true });
+    const target = interaction.options.getUser('user');
+    const currency = interaction.options.getString('currency');
+    const amount = interaction.options.getInteger('amount');
+    const tp = getPlayer(target.id);
+    if (currency === 'gold') {
+      const deduct = Math.min(amount, tp.gold);
+      updatePlayer(target.id, { gold: tp.gold - deduct });
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('💸 [Staff] ลบเงิน')
+        .setDescription(`ลบ **${deduct.toLocaleString()} 🪙 Gold** จาก <@${target.id}>
+เหลือ: **${(tp.gold - deduct).toLocaleString()}**`)] });
+    } else {
+      const deduct = Math.min(amount, tp.rc);
+      updatePlayer(target.id, { rc: tp.rc - deduct });
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('💸 [Staff] ลบเงิน')
+        .setDescription(`ลบ **${deduct.toLocaleString()} 🌈 RC** จาก <@${target.id}>
+เหลือ: **${(tp.rc - deduct).toLocaleString()}**`)] });
+    }
+  }
+
+  // /revoke (Staff)
+  if (cmd === 'revoke') {
+    if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ Staff เท่านั้นครับ', ephemeral: true });
+    const target = interaction.options.getUser('user');
+    const item = interaction.options.getString('item');
+    const amount = interaction.options.getInteger('amount');
+    const tp = getPlayer(target.id);
+    if (item === 'reroll') {
+      const deduct = Math.min(amount, tp.inv_reroll);
+      updatePlayer(target.id, { inv_reroll: tp.inv_reroll - deduct });
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🗑️ [Staff] ลบไอเทม')
+        .setDescription(`ลบ **🎲 Re-roll x${deduct}** จาก <@${target.id}>
+เหลือ: **x${tp.inv_reroll - deduct}**`)] });
+    }
+  }
+
+  // /transfer
+  if (cmd === 'transfer') {
+    const target = interaction.options.getUser('user');
+    const amount = interaction.options.getInteger('amount');
+    if (target.id === userId) return interaction.reply({ content: '❌ โอนให้ตัวเองไม่ได้ครับ', ephemeral: true });
+    if (target.bot) return interaction.reply({ content: '❌ โอนให้บอทไม่ได้ครับ', ephemeral: true });
+    const p = getPlayer(userId);
+    if (p.gold < amount) return interaction.reply({ content: `❌ Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, ephemeral: true });
+    const tp = getPlayer(target.id);
+    updatePlayer(userId, { gold: p.gold - amount });
+    updatePlayer(target.id, { gold: tp.gold + amount });
+    const pAfter = getPlayer(userId);
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('💸 โอน Gold')
+      .setDescription(`โอน **${amount.toLocaleString()} 🪙 Gold** ให้ <@${target.id}> แล้วครับ
+Gold เหลือ: **${pAfter.gold.toLocaleString()}**`)] });
+  }
+
+  // /help
+  if (cmd === 'help') {
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff).setTitle('⚡ St. Elmo's Fire — คำสั่งทั้งหมด')
+      .addFields(
+        { name: '🎲 Roll', value: '`/roll [expression]` — ทอยลูกเต๋า
+`!r [expression]` — ทอยแบบ prefix', inline: false },
+        { name: '💰 เงิน & ไอเทม', value: '`/daily` — รับรางวัลประจำวัน (รีเซ็ตตี 4)
+`/inventory` — ดูกระเป๋า
+`/convert amount` — แลก 3 Gold → 1 RC
+`/use item:reroll` — ใช้ Re-roll
+`/transfer @user amount` — โอน Gold', inline: false },
+        { name: '🎰 เกมพนัน', value: '`/coinflip amount choice` — ทอยเหรียญ (45% ชนะ 2x)
+`/slots amount` — สล็อต (35% ชนะ + Jackpot)
+`/blackjack amount` — แบล็คแจ็ค (45% ชนะ 2x)
+`/roulette amount bet` — รูเล็ต (2x-35x)', inline: false },
+        { name: '📊 กฎพนัน', value: 'Tax 3% จากเงินที่ชนะ
+Win Cap 10,000 Gold/วัน
+Slots Jackpot Pool สะสม 5% จากทุกการแพ้', inline: false },
+        { name: '🛡️ Staff เท่านั้น', value: '`/give @user currency amount` — แจกเงิน
+`/gift @user item amount` — แจกไอเทม
+`/take @user currency amount` — ลบเงิน
+`/revoke @user item amount` — ลบไอเทม
+`/inspect @user` — ดู inventory สมาชิก', inline: false },
+      )], ephemeral: false });
   }
 }
 
