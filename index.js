@@ -1,6 +1,7 @@
-// index.js — St. Elmo's Fire v3.0
+// index.js — St. Elmo's Fire v3.1
 // Commands: !r, /roll, /daily, /inventory, /coinflip, /slots, /blackjack, /roulette
-//           /convert, /use, /give (staff), /gift (staff)
+//           /convert, /use, /transfer, /help
+//           /give, /gift, /take, /revoke, /inspect (Staff)
 // Storage: SQLite (better-sqlite3)
 // CSPRNG: crypto.randomInt()
 
@@ -26,6 +27,7 @@ const STARTING_GOLD = 1500;
 const EXCHANGE_RATE = 3;
 const STAFF_ROLE    = 'Staff';
 const OWNER_ID      = process.env.OWNER_ID || '';
+const BOTNAME       = "St. Elmo's Fire";
 
 const DAILY_REWARDS = [
   { type: 'gold', amount: 200 },
@@ -36,6 +38,8 @@ const DAILY_REWARDS = [
   { type: 'rc',   amount: 50 },
   { type: 'item',  item: 'reroll', amount: 1 },
 ];
+
+const DAILY_LABELS = ['🪙 200 Gold','🪙 400 Gold','🪙 600 Gold','🪙 800 Gold','🪙 1,000 Gold','🌈 50 RC','🎲 Re-roll x1'];
 
 // ══════════════════════════════════════════════
 //  DATABASE
@@ -61,16 +65,11 @@ db.exec(`
   INSERT OR IGNORE INTO jackpot (id, pool) VALUES (1, 0);
 `);
 
-// คืน string วันปัจจุบันโดยนับตี 4 ไทย (UTC+7) เป็นจุดเริ่มต้นวันใหม่
+// Reset วันใหม่ที่ตี 4 ไทย (ICT = UTC+7)
 function getDayKey() {
-  // UTC+7 = +420 นาที, reset ที่ 04:00 ICT = 21:00 UTC วันก่อน
-  const now = new Date();
-  const ict = new Date(now.getTime() + 7 * 60 * 60 * 1000); // shift to ICT
-  // ถ้ายังไม่ถึง 04:00 ICT ให้ถือว่าเป็น "วันก่อน"
-  if (ict.getUTCHours() < 4) {
-    ict.setUTCDate(ict.getUTCDate() - 1);
-  }
-  return ict.toUTCString().slice(0, 16); // "Mon, 07 Apr 2026"
+  const ict = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  if (ict.getUTCHours() < 4) ict.setUTCDate(ict.getUTCDate() - 1);
+  return ict.toISOString().slice(0, 10); // "2026-04-08"
 }
 
 function getPlayer(userId) {
@@ -101,6 +100,43 @@ function setPool(val) { db.prepare('UPDATE jackpot SET pool = ? WHERE id = 1').r
 // ══════════════════════════════════════════════
 function rand(min, max) { return randomInt(min, max + 1); }
 function randF() { return randomInt(0, 1000000) / 1000000; }
+
+// ══════════════════════════════════════════════
+//  ECONOMY
+//  applyLoss: หักเงินก่อนเล่น
+//  applyWin:  คืนเงินเดิมพัน + กำไร (หัก tax)
+// ══════════════════════════════════════════════
+function applyLoss(userId, amount) {
+  const p = getPlayer(userId);
+  if (p.gold < amount) return { ok: false, reason: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})` };
+  updatePlayer(userId, { gold: p.gold - amount });
+  return { ok: true, gold: p.gold - amount };
+}
+
+function applyWin(userId, betAmount, payoutMult) {
+  // betAmount = เงินที่หักออกไปแล้ว, payoutMult = อัตราจ่าย (2 = 2x)
+  // กำไรสุทธิ = betAmount * payoutMult - betAmount = betAmount * (payoutMult - 1)
+  // หัก tax จากกำไร แล้วบวกคืนเงินเดิมพัน
+  const p = getPlayer(userId);
+  const profit = Math.floor(betAmount * (payoutMult - 1) * (1 - TAX));
+  const netGain = betAmount + profit; // คืนเงินเดิมพัน + กำไรสุทธิ
+
+  if (p.win_today >= WIN_CAP) {
+    // ถึง cap — คืนเงินเดิมพันอย่างเดียว ไม่ได้กำไร
+    updatePlayer(userId, { gold: p.gold + betAmount });
+    return { ok: false, reason: `ถึง Daily Win Cap แล้วครับ คืนเงินเดิมพัน ${betAmount.toLocaleString()} Gold`, gold: p.gold + betAmount };
+  }
+
+  const capProfit = Math.min(profit, WIN_CAP - p.win_today);
+  const finalGain = betAmount + capProfit;
+  updatePlayer(userId, { gold: p.gold + finalGain, win_today: p.win_today + capProfit });
+  const fresh = getPlayer(userId);
+  return { ok: true, profit: capProfit, gold: fresh.gold };
+}
+
+function isStaff(member) {
+  return member.roles.cache.some(r => r.name === STAFF_ROLE) || member.permissions.has(PermissionFlagsBits.Administrator);
+}
 
 // ══════════════════════════════════════════════
 //  DICE PARSER
@@ -152,14 +188,15 @@ function parseSegment(raw, sign) {
   if (sm) { const iR = /^\d+$/.test(sm[2]); const sub = parseSegment(iR ? sm[1] : sm[2], 1); if (sub.err) return sub; return { type: 'multiply', sign, tokens: [sub], mult: parseInt(iR ? sm[2] : sm[1]) }; }
   const dm = raw.match(/^(\d*)d(\d+)(?:(kh|kl)(\d+))?$/);
   if (dm) {
-    const num = parseInt(dm[1] || '1'), sides = parseInt(dm[2]), mode = dm[3] || 'normal', keep = dm[4] ? parseInt(dm[4]) : num;
-    if (num < 1 || num > 100)       return { err: `จำนวนลูกเต๋าต้อง 1–100 (${raw})` };
-    if (sides < 2 || sides > 10000) return { err: `จำนวนหน้าต้อง 2–10000 (${raw})` };
-    if (keep < 1 || keep > num)     return { err: `keep ต้อง 1–${num} (${raw})` };
+    const num = parseInt(dm[1] || '1'), sides = parseInt(dm[2]);
+    const mode = dm[3] || 'normal', keep = dm[4] ? parseInt(dm[4]) : num;
+    if (num < 1 || num > 100)       return { err: `จำนวนลูกเต๋าต้อง 1-100 (${raw})` };
+    if (sides < 2 || sides > 10000) return { err: `จำนวนหน้าต้อง 2-10000 (${raw})` };
+    if (keep < 1 || keep > num)     return { err: `keep ต้อง 1-${num} (${raw})` };
     return { type: 'dice', sign, num, sides, mode, keep };
   }
   if (/^\d+$/.test(raw)) return { type: 'flat', sign, value: parseInt(raw) };
-  return { err: `ไม่รู้จัก: \`${raw}\`` };
+  return { err: `ไม่รู้จัก: ${raw}` };
 }
 
 function rollSegment(seg) {
@@ -197,63 +234,36 @@ function buildRollEmbed(parsed, tokens, username) {
   if (parsed.mode === 'adv') lines.push('`ADVANTAGE`');
   if (parsed.mode === 'dis') lines.push('`DISADVANTAGE`');
   for (const r of results) {
-    if (r.type === 'flat') { lines.push(`${r.sign < 0 ? '−' : '+'} **${r.value}** (modifier)`); continue; }
+    if (r.type === 'flat') { lines.push(`${r.sign < 0 ? '-' : '+'} **${r.value}** (modifier)`); continue; }
     if (r.type === 'multiply') {
       for (const sr of r.subResults) {
         if (sr.type === 'dice') {
           let ex = `${sr.num}d${sr.sides}`;
           if (sr.mode === 'kh') ex += ` kh${sr.keep}`;
           if (sr.mode === 'kl') ex += ` kl${sr.keep}`;
-          lines.push(`\`${ex}\` → ${formatDice(sr)}`);
+          lines.push(`\`${ex}\` -> ${formatDice(sr)}`);
         }
       }
-      lines.push(`× ${r.mult} = **${r.sign < 0 ? '−' : ''}${Math.abs(r.total)}**`); continue;
+      lines.push(`x ${r.mult} = **${r.sign < 0 ? '-' : ''}${Math.abs(r.total)}**`); continue;
     }
     let ex = `${r.num}d${r.sides}`;
     if (r.mode === 'kh') ex += ` kh${r.keep}`;
     if (r.mode === 'kl') ex += ` kl${r.keep}`;
     const tags = parsed.tags.length ? ` [${parsed.tags.join(', ')}]` : '';
-    const sub = isMulti ? ` = **${r.sign < 0 ? '−' : ''}${Math.abs(r.sub)}**` : '';
-    lines.push(`\`${ex}${tags}\` → ${formatDice(r)}${sub}`);
+    const sub = isMulti ? ` = **${r.sign < 0 ? '-' : ''}${Math.abs(r.sub)}**` : '';
+    lines.push(`\`${ex}${tags}\` -> ${formatDice(r)}${sub}`);
   }
   lines.push(`\n@${username}\u2003**${grand}**`);
   return new EmbedBuilder().setColor(0xbb88ff).setDescription(lines.join('\n'));
 }
 
 // ══════════════════════════════════════════════
-//  ECONOMY HELPERS
-// ══════════════════════════════════════════════
-function applyWin(userId, amount) {
-  const p = getPlayer(userId); // fresh fetch หลัง applyLoss แล้ว
-  if (p.win_today >= WIN_CAP) return { ok: false, reason: `ถึง Daily Win Cap แล้วครับ (${WIN_CAP.toLocaleString()}/วัน)` };
-  const actual = Math.min(amount, WIN_CAP - p.win_today);
-  const taxed = Math.floor(actual * (1 - TAX));
-  // p.gold ตอนนี้คือยอดหลัง applyLoss หักไปแล้ว
-  // ต้องบวกเงินเดิมพันคืน + กำไร (taxed = winAmount - tax)
-  // เช่น เดิมพัน 500, ชนะ 2x: ได้คืน 500 + กำไร 485 = 985
-  // แต่ p.gold ตอนนี้ถูกหัก 500 ไปแล้ว ดังนั้นบวกแค่ taxed ไม่พอ
-  // ต้องบวก amount (เงินเดิมพันที่หักไปแล้ว) + taxed (กำไรสุทธิ)
-  const netGain = amount + taxed; // คืนเงินเดิมพัน + กำไร
-  updatePlayer(userId, { gold: p.gold + netGain, win_today: p.win_today + actual });
-  return { ok: true, taxed, actual, gold: p.gold + netGain };
-}
-
-function applyLoss(userId, amount) {
-  const p = getPlayer(userId);
-  if (p.gold < amount) return { ok: false, reason: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})` };
-  updatePlayer(userId, { gold: p.gold - amount });
-  return { ok: true, gold: p.gold - amount };
-}
-
-function isStaff(member) {
-  return member.roles.cache.some(r => r.name === STAFF_ROLE) || member.permissions.has(PermissionFlagsBits.Administrator);
-}
-
-// ══════════════════════════════════════════════
 //  SLOTS
 // ══════════════════════════════════════════════
-const SLOT_SYMS = ['🍒','🍋','🍊','⭐','💎','7️⃣'];
-const SLOT_W    = [30, 25, 20, 15, 7, 3];
+const SLOT_SYMS = ['cherry','lemon','orange','star','diamond','seven'];
+const SLOT_EMOJI = { cherry:'🍒', lemon:'🍋', orange:'🍊', star:'⭐', diamond:'💎', seven:'7' };
+const SLOT_MULT  = { cherry:3, lemon:3, orange:3, star:5, diamond:10, seven:50 };
+const SLOT_W     = [30, 25, 20, 15, 7, 3];
 
 function spinSlot() {
   const r = rand(1, 100); let c = 0;
@@ -265,17 +275,16 @@ function spinSlot() {
 //  BLACKJACK STATE
 // ══════════════════════════════════════════════
 const bjGames = new Map();
-
-const BJ_SUITS = ['♠','♥','♦','♣'], BJ_RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+const BJ_SUITS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 function makeDeck() {
   const d = [];
-  for (const s of BJ_SUITS) for (const r of BJ_RANKS) d.push({ r, s });
+  for (const s of ['S','H','D','C']) for (const r of BJ_SUITS) d.push({ r, s });
   for (let i = d.length - 1; i > 0; i--) { const j = rand(0, i); [d[i], d[j]] = [d[j], d[i]]; }
   return d;
 }
 function cardVal(c) { if (['J','Q','K'].includes(c.r)) return 10; if (c.r === 'A') return 11; return parseInt(c.r); }
 function handVal(h) { let v = h.reduce((a, c) => a + cardVal(c), 0), ac = h.filter(c => c.r === 'A').length; while (v > 21 && ac > 0) { v -= 10; ac--; } return v; }
-function cardStr(c) { return `${c.r}${c.s}`; }
+function cardStr(c) { const suit = { S:'♠', H:'♥', D:'♦', C:'♣' }[c.s]; return `${c.r}${suit}`; }
 
 // ══════════════════════════════════════════════
 //  ROULETTE
@@ -292,95 +301,97 @@ function roulWin(bet, n) {
   if (!isNaN(parseInt(bet))) return parseInt(bet) === n;
   return false;
 }
-function roulPay(bet) { return ['red','black','odd','even','1-18','19-36'].includes(bet) ? 2 : 35; }
+function roulPay(bet) { return ['red','black','odd','even','1-18','19-36'].includes(bet) ? 2 : 36; }
 
 // ══════════════════════════════════════════════
-//  SLASH COMMAND DEFINITIONS
+//  SLASH COMMANDS
 // ══════════════════════════════════════════════
 const commands = [
   new SlashCommandBuilder().setName('roll').setDescription('ทอยลูกเต๋า')
-    .addStringOption(o => o.setName('expression').setDescription('เช่น 4d30kh3, 2d20 adv').setRequired(false)),
+    .addStringOption(o => o.setName('expression').setDescription('เช่น 4d30kh3').setRequired(false)),
 
-  new SlashCommandBuilder().setName('daily').setDescription('รับรางวัล login ประจำวัน'),
+  new SlashCommandBuilder().setName('daily').setDescription('รับรางวัล login ประจำวัน (รีเซ็ตตี 4)'),
 
-  new SlashCommandBuilder().setName('inventory').setDescription('ดูกระเป๋า เงิน ไอเทม'),
+  new SlashCommandBuilder().setName('inventory').setDescription('ดูกระเป๋าเงิน ไอเทม daily streak'),
 
-  new SlashCommandBuilder().setName('convert').setDescription('แลก Gold → Rainbow Carrot (3:1)')
+  new SlashCommandBuilder().setName('convert').setDescription('แลก Gold เป็น Rainbow Carrot (3:1)')
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน Gold').setRequired(true).setMinValue(3)),
 
   new SlashCommandBuilder().setName('use').setDescription('ใช้ไอเทม')
     .addStringOption(o => o.setName('item').setDescription('ไอเทม').setRequired(true)
-      .addChoices({ name: '🎲 Re-roll', value: 'reroll' })),
+      .addChoices({ name: 'Re-roll', value: 'reroll' })),
 
-  new SlashCommandBuilder().setName('coinflip').setDescription('ทอยเหรียญ')
+  new SlashCommandBuilder().setName('transfer').setDescription('โอน Gold ให้สมาชิก')
+    .addUserOption(o => o.setName('user').setDescription('ผู้รับ').setRequired(true))
+    .addIntegerOption(o => o.setName('amount').setDescription('จำนวน Gold').setRequired(true).setMinValue(1)),
+
+  new SlashCommandBuilder().setName('coinflip').setDescription('ทอยเหรียญ (45% ชนะ 2x)')
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน Gold').setRequired(true).setMinValue(1))
     .addStringOption(o => o.setName('choice').setDescription('หัว/ก้อย').setRequired(true)
-      .addChoices({ name: 'Heads 🟡', value: 'heads' }, { name: 'Tails ⚫', value: 'tails' })),
+      .addChoices({ name: 'Heads', value: 'heads' }, { name: 'Tails', value: 'tails' })),
 
-  new SlashCommandBuilder().setName('slots').setDescription('สล็อต — Progressive Jackpot')
+  new SlashCommandBuilder().setName('slots').setDescription('สล็อต (35% ชนะ + Progressive Jackpot)')
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน Gold').setRequired(true).setMinValue(1)),
 
-  new SlashCommandBuilder().setName('blackjack').setDescription('แบล็คแจ็ค')
+  new SlashCommandBuilder().setName('blackjack').setDescription('แบล็คแจ็ค (45% ชนะ 2x)')
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน Gold').setRequired(true).setMinValue(1)),
 
-  new SlashCommandBuilder().setName('roulette').setDescription('รูเล็ต')
+  new SlashCommandBuilder().setName('roulette').setDescription('รูเล็ต (2x-36x)')
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน Gold').setRequired(true).setMinValue(1))
-    .addStringOption(o => o.setName('bet').setDescription('red/black/odd/even/1-18/19-36/0-36').setRequired(true)),
+    .addStringOption(o => o.setName('bet').setDescription('red/black/odd/even/1-18/19-36/ตัวเลข 0-36').setRequired(true)),
 
-  new SlashCommandBuilder().setName('give').setDescription('[Staff] แจกเงิน')
+  new SlashCommandBuilder().setName('help').setDescription('ดูคำสั่งทั้งหมด'),
+
+  // Staff commands
+  new SlashCommandBuilder().setName('give').setDescription('[Staff] แจกเงินให้สมาชิก')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption(o => o.setName('user').setDescription('ผู้เล่น').setRequired(true))
+    .addUserOption(o => o.setName('user').setDescription('ผู้รับ').setRequired(true))
     .addStringOption(o => o.setName('currency').setDescription('สกุลเงิน').setRequired(true)
-      .addChoices({ name: '🪙 Gold', value: 'gold' }, { name: '🌈 Rainbow Carrot', value: 'rc' }))
+      .addChoices({ name: 'Gold', value: 'gold' }, { name: 'Rainbow Carrot', value: 'rc' }))
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน').setRequired(true).setMinValue(1)),
 
-  new SlashCommandBuilder().setName('gift').setDescription('[Staff] แจกไอเทม')
+  new SlashCommandBuilder().setName('gift').setDescription('[Staff] แจกไอเทมให้สมาชิก')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption(o => o.setName('user').setDescription('ผู้เล่น').setRequired(true))
+    .addUserOption(o => o.setName('user').setDescription('ผู้รับ').setRequired(true))
     .addStringOption(o => o.setName('item').setDescription('ไอเทม').setRequired(true)
-      .addChoices({ name: '🎲 Re-roll', value: 'reroll' }))
+      .addChoices({ name: 'Re-roll', value: 'reroll' }))
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน').setRequired(true).setMinValue(1)),
-
-  new SlashCommandBuilder().setName('inspect').setDescription('[Staff] ดู inventory ของสมาชิก')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption(o => o.setName('user').setDescription('ผู้เล่น').setRequired(true)),
 
   new SlashCommandBuilder().setName('take').setDescription('[Staff] ลบเงินออกจากสมาชิก')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption(o => o.setName('user').setDescription('ผู้เล่น').setRequired(true))
+    .addUserOption(o => o.setName('user').setDescription('สมาชิก').setRequired(true))
     .addStringOption(o => o.setName('currency').setDescription('สกุลเงิน').setRequired(true)
-      .addChoices({ name: '🪙 Gold', value: 'gold' }, { name: '🌈 Rainbow Carrot', value: 'rc' }))
+      .addChoices({ name: 'Gold', value: 'gold' }, { name: 'Rainbow Carrot', value: 'rc' }))
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน').setRequired(true).setMinValue(1)),
 
   new SlashCommandBuilder().setName('revoke').setDescription('[Staff] ลบไอเทมออกจากสมาชิก')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption(o => o.setName('user').setDescription('ผู้เล่น').setRequired(true))
+    .addUserOption(o => o.setName('user').setDescription('สมาชิก').setRequired(true))
     .addStringOption(o => o.setName('item').setDescription('ไอเทม').setRequired(true)
-      .addChoices({ name: '🎲 Re-roll', value: 'reroll' }))
+      .addChoices({ name: 'Re-roll', value: 'reroll' }))
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน').setRequired(true).setMinValue(1)),
 
-  new SlashCommandBuilder().setName('transfer').setDescription('โอน Gold ให้สมาชิก (RC โอนไม่ได้)')
-    .addUserOption(o => o.setName('user').setDescription('ผู้รับ').setRequired(true))
-    .addIntegerOption(o => o.setName('amount').setDescription('จำนวน Gold').setRequired(true).setMinValue(1)),
+  new SlashCommandBuilder().setName('inspect').setDescription('[Staff] ดู inventory ของสมาชิก')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addUserOption(o => o.setName('user').setDescription('สมาชิก').setRequired(true)),
 
-  new SlashCommandBuilder().setName('help').setDescription('ดูคำสั่งทั้งหมด'),
 ].map(c => c.toJSON());
 
 async function deployCommands() {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-  console.log('✅ Slash commands registered');
+  console.log('Slash commands registered');
 }
 
 // ══════════════════════════════════════════════
-//  BOT CLIENT
+//  BOT
 // ══════════════════════════════════════════════
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
 client.once('clientReady', async () => {
-  console.log(`✅ St. Elmo's Fire v3.0 online: ${client.user.tag}`);
+  console.log(`St. Elmo's Fire v3.1 online: ${client.user.tag}`);
   await deployCommands();
 });
 
@@ -390,10 +401,10 @@ client.on('messageCreate', async msg => {
   if (!msg.content.toLowerCase().startsWith(PREFIX)) return;
   const raw = msg.content.slice(PREFIX.length).trim() || '1d20';
   const parsed = parseRoll(raw);
-  if (parsed.err) return msg.reply(`❌ ${parsed.err}`);
+  if (parsed.err) return msg.reply(`Error: ${parsed.err}`);
   const username = msg.member?.displayName || msg.author.username;
   try { await msg.reply({ embeds: [buildRollEmbed(parsed, parsed.tokens, username)] }); }
-  catch (e) { console.error(e); await msg.reply('❌ เกิดข้อผิดพลาด'); }
+  catch (e) { console.error(e); await msg.reply('Error: กรุณาลองใหม่'); }
 });
 
 // ── Interactions ───────────────────────────────
@@ -403,12 +414,15 @@ client.on('interactionCreate', async interaction => {
     else if (interaction.isButton()) await handleButton(interaction);
   } catch (e) {
     console.error(e);
-    const reply = { content: '❌ เกิดข้อผิดพลาด กรุณาลองใหม่ครับ', ephemeral: true };
-    if (interaction.replied || interaction.deferred) await interaction.followUp(reply);
-    else await interaction.reply(reply);
+    const rep = { content: 'Error: กรุณาลองใหม่ครับ', ephemeral: true };
+    if (interaction.replied || interaction.deferred) await interaction.followUp(rep);
+    else await interaction.reply(rep);
   }
 });
 
+// ══════════════════════════════════════════════
+//  SLASH COMMAND HANDLERS
+// ══════════════════════════════════════════════
 async function handleSlash(interaction) {
   const cmd = interaction.commandName;
   const userId = interaction.user.id;
@@ -418,7 +432,7 @@ async function handleSlash(interaction) {
   if (cmd === 'roll') {
     const raw = interaction.options.getString('expression') || '1d20';
     const parsed = parseRoll(raw);
-    if (parsed.err) return interaction.reply({ content: `❌ ${parsed.err}`, ephemeral: true });
+    if (parsed.err) return interaction.reply({ content: `Error: ${parsed.err}`, ephemeral: true });
     return interaction.reply({ embeds: [buildRollEmbed(parsed, parsed.tokens, username)] });
   }
 
@@ -427,26 +441,29 @@ async function handleSlash(interaction) {
     const p = getPlayer(userId);
     const today = getDayKey();
     if (p.last_daily === today) {
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('📅 Daily').setDescription('รับแล้ววันนี้ครับ มาใหม่พรุ่งนี้! 🌙')], ephemeral: true });
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setColor(0x5865f2).setTitle('Daily')
+          .setDescription('รับแล้ววันนี้ครับ มาใหม่ตี 4!')
+      ], ephemeral: true });
     }
-    const yest = new Date(new Date().getTime() + 7*60*60*1000);
-    if (yest.getUTCHours() < 4) yest.setUTCDate(yest.getUTCDate() - 1);
-    yest.setUTCDate(yest.getUTCDate() - 1);
-    const yestKey = yest.toUTCString().slice(0, 16);
+    // Check streak
+    const yestDate = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    if (yestDate.getUTCHours() < 4) yestDate.setUTCDate(yestDate.getUTCDate() - 1);
+    yestDate.setUTCDate(yestDate.getUTCDate() - 1);
+    const yestKey = yestDate.toISOString().slice(0, 10);
     const streak = p.last_daily === yestKey ? (p.streak % 7) + 1 : 1;
     const reward = DAILY_REWARDS[streak - 1];
     const updates = { streak, last_daily: today };
-    if (reward.type === 'gold') { updates.gold = p.gold + reward.amount; }
-    if (reward.type === 'rc')   { updates.rc   = p.rc   + reward.amount; }
-    if (reward.type === 'item' && reward.item === 'reroll') { updates.inv_reroll = p.inv_reroll + 1; }
+    if (reward.type === 'gold')  updates.gold       = p.gold + reward.amount;
+    if (reward.type === 'rc')    updates.rc          = p.rc + reward.amount;
+    if (reward.type === 'item')  updates.inv_reroll  = p.inv_reroll + 1;
     updatePlayer(userId, updates);
-    // re-fetch to confirm
-    const pAfter = getPlayer(userId);
-    const labels = ['🪙 200 Gold','🪙 400 Gold','🪙 600 Gold','🪙 800 Gold','🪙 1,000 Gold','🌈 50 RC','🎲 Re-roll x1'];
-    const bar = Array.from({length:7}, (_,i) => i < streak ? '⭐' : '☆').join(' ');
-    const nextInfo = streak < 7 ? `\n\nพรุ่งนี้: ${labels[streak]}` : '\n\n🎉 ครบ 7 วัน! Streak รีเซ็ต';
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('📅 Daily Login — รับแล้ว!')
-      .setDescription(`วันที่ ${streak}/7\n${bar}\n\nรางวัล: **${labels[streak-1]}**${nextInfo}`)] });
+    const bar = Array.from({ length: 7 }, (_, i) => i < streak ? 'star' : 'empty').map(x => x === 'star' ? '⭐' : '☆').join(' ');
+    const nextInfo = streak < 7 ? `\nพรุ่งนี้: **${DAILY_LABELS[streak]}**` : '\nครบ 7 วัน! Streak รีเซ็ต';
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0x57f287).setTitle('Daily Login')
+        .setDescription(`วันที่ ${streak}/7\n${bar}\n\nรางวัล: **${DAILY_LABELS[streak - 1]}**${nextInfo}`)
+    ] });
   }
 
   // /inventory
@@ -454,28 +471,32 @@ async function handleSlash(interaction) {
     const p = getPlayer(userId);
     const pool = getPool();
     const isOwner = userId === OWNER_ID;
-    const color = isOwner ? 0x6a1aff : 0x111111;
-    const bar = Array.from({length:7}, (_,i) => i < p.streak ? '⭐' : '☆').join(' ');
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(color).setTitle(`📦 ${username}`)
-      .addFields(
-        { name: '💰 ยอดเงิน', value: `🪙 Gold: **${p.gold.toLocaleString()}**\n🌈 RC: **${p.rc.toLocaleString()}**\n📊 ชนะวันนี้: ${p.win_today.toLocaleString()}/${WIN_CAP.toLocaleString()}`, inline: true },
-        { name: '🎒 Items', value: `🎲 Re-roll: **x${p.inv_reroll}**`, inline: true },
-        { name: '📅 Daily Streak', value: `${bar}\n${p.streak}/7 วัน`, inline: false },
-        { name: '🎰 Jackpot Pool', value: `สะสม: **${pool.toLocaleString()}** Gold\nถ้าตีได้: **${(pool * JACKPOT_MULT).toLocaleString()}** Gold`, inline: false },
-      )] });
+    const color = isOwner ? 0x9B59B6 : 0x111111;
+    const bar = Array.from({ length: 7 }, (_, i) => i < p.streak ? '⭐' : '☆').join(' ');
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(color).setTitle(`Inventory — ${username}`)
+        .addFields(
+          { name: 'ยอดเงิน', value: `Gold: **${p.gold.toLocaleString()}**\nRC: **${p.rc.toLocaleString()}**\nชนะวันนี้: ${p.win_today.toLocaleString()}/${WIN_CAP.toLocaleString()}`, inline: true },
+          { name: 'Items', value: `Re-roll: **x${p.inv_reroll}**`, inline: true },
+          { name: 'Daily Streak', value: `${bar}\n${p.streak}/7 วัน`, inline: false },
+          { name: 'Jackpot Pool', value: `สะสม: **${pool.toLocaleString()}** Gold\nถ้าตีได้: **${(pool * JACKPOT_MULT).toLocaleString()}** Gold`, inline: false },
+        )
+    ] });
   }
 
   // /convert
   if (cmd === 'convert') {
     const p = getPlayer(userId);
     const amount = interaction.options.getInteger('amount');
-    if (amount % EXCHANGE_RATE !== 0) return interaction.reply({ content: `❌ ต้องแลกเป็นทวีคูณของ ${EXCHANGE_RATE} ครับ (3 Gold = 1 RC)`, ephemeral: true });
-    if (p.gold < amount) return interaction.reply({ content: `❌ Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, ephemeral: true });
+    if (amount % EXCHANGE_RATE !== 0) return interaction.reply({ content: `ต้องแลกเป็นทวีคูณของ ${EXCHANGE_RATE} ครับ (3 Gold = 1 RC)`, ephemeral: true });
+    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, ephemeral: true });
     const rc = amount / EXCHANGE_RATE;
     updatePlayer(userId, { gold: p.gold - amount, rc: p.rc + rc });
-    const pConv = getPlayer(userId);
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff).setTitle('🔄 แลกเงิน')
-      .setDescription(`🪙 -${amount.toLocaleString()} Gold → 🌈 +${rc.toLocaleString()} RC\n\nGold เหลือ: **${pConv.gold.toLocaleString()}**\nRC ทั้งหมด: **${pConv.rc.toLocaleString()}**`)] });
+    const fresh = getPlayer(userId);
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0xbb88ff).setTitle('แลกเงิน')
+        .setDescription(`-${amount.toLocaleString()} Gold -> +${rc.toLocaleString()} RC\n\nGold เหลือ: **${fresh.gold.toLocaleString()}**\nRC ทั้งหมด: **${fresh.rc.toLocaleString()}**`)
+    ] });
   }
 
   // /use
@@ -483,209 +504,12 @@ async function handleSlash(interaction) {
     const p = getPlayer(userId);
     const item = interaction.options.getString('item');
     if (item === 'reroll') {
-      if (p.inv_reroll < 1) return interaction.reply({ content: '❌ ไม่มี Re-roll ครับ', ephemeral: true });
+      if (p.inv_reroll < 1) return interaction.reply({ content: 'ไม่มี Re-roll ครับ', ephemeral: true });
       updatePlayer(userId, { inv_reroll: p.inv_reroll - 1 });
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff).setTitle('🎲 ใช้ Re-roll')
-        .setDescription(`ใช้ Re-roll แล้วครับ!\nเหลือ: **x${p.inv_reroll - 1}**\n\nทอยใหม่ได้เลยครับ 🎲`)] });
-    }
-  }
-
-  // /coinflip
-  if (cmd === 'coinflip') {
-    const p = getPlayer(userId);
-    if (p.win_today >= WIN_CAP) return interaction.reply({ content: `❌ ถึง Daily Win Cap แล้วครับ (${WIN_CAP.toLocaleString()}/วัน)`, ephemeral: true });
-    const amount = interaction.options.getInteger('amount');
-    const choice = interaction.options.getString('choice');
-    const lossResult = applyLoss(userId, amount);
-    if (!lossResult.ok) return interaction.reply({ content: `❌ ${lossResult.reason}`, ephemeral: true });
-    const win = randF() < 0.45;
-    const result = win ? choice : (choice === 'heads' ? 'tails' : 'heads');
-    const emoji = result === 'heads' ? '🟡' : '⚫';
-    if (win) {
-      const w = applyWin(userId, amount);
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle(`${emoji} Coinflip — ชนะ!`)
-        .setDescription(`ผล: **${result.toUpperCase()}** ✅\n\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} 🪙**`)] });
-    } else {
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle(`${emoji} Coinflip — แพ้`)
-        .setDescription(`ผล: **${result.toUpperCase()}** ❌\n\n-${amount.toLocaleString()} Gold\nยอดรวม: **${lossResult.gold.toLocaleString()} 🪙**`)] });
-    }
-  }
-
-  // /slots
-  if (cmd === 'slots') {
-    const p = getPlayer(userId);
-    if (p.win_today >= WIN_CAP) return interaction.reply({ content: `❌ ถึง Daily Win Cap แล้วครับ`, ephemeral: true });
-    const amount = interaction.options.getInteger('amount');
-    const lossR = applyLoss(userId, amount);
-    if (!lossR.ok) return interaction.reply({ content: `❌ ${lossR.reason}`, ephemeral: true });
-
-    const contrib = Math.floor(amount * POOL_CONTRIB);
-    setPool(getPool() + contrib);
-
-    const forceWin = randF() < 0.35;
-    let reels = [spinSlot(), spinSlot(), spinSlot()];
-    if (forceWin) { const s = spinSlot(); reels = [s, s, s]; }
-    else { while (reels[0] === reels[1] && reels[1] === reels[2]) reels[2] = spinSlot(); }
-
-    const pool = getPool();
-    const isJP = forceWin && reels[0] === '7️⃣' && pool > 0;
-    const reelStr = reels.join('  ');
-
-    if (isJP) {
-      const jpAmt = pool * JACKPOT_MULT;
-      const taxed = Math.floor(jpAmt * (1 - TAX));
-      setPool(0);
-      const pFresh = getPlayer(userId);
-      updatePlayer(userId, { gold: pFresh.gold + taxed, win_today: Math.min(pFresh.win_today + jpAmt, WIN_CAP) });
-      const pJP = getPlayer(userId);
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('🎰 JACKPOT!!!')
-        .setDescription(`${reelStr}\n\n🎊 **7️⃣ 7️⃣ 7️⃣ — JACKPOT!**\nPool: ${pool.toLocaleString()} × ${JACKPOT_MULT}\nหัก Tax 3% → **+${taxed.toLocaleString()} Gold**\nยอดรวม: **${pJP.gold.toLocaleString()} 🪙**`)] });
-    }
-
-    if (forceWin) {
-      const mult = reels[0] === '💎' ? 10 : reels[0] === '⭐' ? 5 : 3;
-      const w = applyWin(userId, amount * mult);
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🎰 Slots — ชนะ!')
-        .setDescription(`${reelStr}\n\n**${reels[0]}${reels[0]}${reels[0]} — ${mult}x!**\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} 🪙**`)] });
-    }
-
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🎰 Slots')
-      .setDescription(`${reelStr}\n\nไม่ match — -${amount.toLocaleString()} Gold\n(${contrib} เข้า Jackpot Pool)\nPool ปัจจุบัน: ${getPool().toLocaleString()}\nยอดรวม: **${lossR.gold.toLocaleString()} 🪙**`)] });
-  }
-
-  // /blackjack
-  if (cmd === 'blackjack') {
-    const p = getPlayer(userId);
-    if (p.win_today >= WIN_CAP) return interaction.reply({ content: `❌ ถึง Daily Win Cap แล้วครับ`, ephemeral: true });
-    if (bjGames.has(userId)) return interaction.reply({ content: '❌ มีเกม Blackjack ค้างอยู่ครับ', ephemeral: true });
-    const amount = interaction.options.getInteger('amount');
-    const bjLoss = applyLoss(userId, amount);
-    if (!bjLoss.ok) return interaction.reply({ content: `❌ ${bjLoss.reason}`, ephemeral: true });
-
-    const deck = makeDeck();
-    const game = { amount, deck, player: [deck.pop(), deck.pop()], dealer: [deck.pop(), deck.pop()], userId };
-    const pv = handVal(game.player);
-
-    if (pv === 21) {
-      const w = applyWin(userId, Math.floor(amount * 2.5));
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🃏 BLACKJACK! 21!')
-        .setDescription(`ไพ่คุณ: ${game.player.map(c => cardStr(c)).join(' ')}\n\n**BLACKJACK! ชนะ 2.5x!**\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} 🪙**`)] });
-    }
-
-    bjGames.set(userId, game);
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`bj_hit_${userId}`).setLabel('🃏 Hit').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`bj_stand_${userId}`).setLabel('✋ Stand').setStyle(ButtonStyle.Danger),
-    );
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('🃏 Blackjack')
-      .setDescription(`**Dealer:** ${cardStr(game.dealer[0])} ??\n**คุณ (${pv}):** ${game.player.map(c => cardStr(c)).join(' ')}`)], components: [row] });
-  }
-
-  // /roulette
-  if (cmd === 'roulette') {
-    const p = getPlayer(userId);
-    if (p.win_today >= WIN_CAP) return interaction.reply({ content: `❌ ถึง Daily Win Cap แล้วครับ`, ephemeral: true });
-    const amount = interaction.options.getInteger('amount');
-    const bet = interaction.options.getString('bet').toLowerCase();
-    const validBets = ['red','black','odd','even','1-18','19-36'];
-    const isNumBet = !isNaN(parseInt(bet)) && parseInt(bet) >= 0 && parseInt(bet) <= 36;
-    if (!validBets.includes(bet) && !isNumBet) return interaction.reply({ content: '❌ bet ไม่ถูกต้องครับ\nตัวเลือก: red, black, odd, even, 1-18, 19-36 หรือตัวเลข 0-36', ephemeral: true });
-    const rlLoss = applyLoss(userId, amount);
-    if (!rlLoss.ok) return interaction.reply({ content: `❌ ${rlLoss.reason}`, ephemeral: true });
-    const n = rand(0, 36);
-    const color = roulColor(n);
-    const colorEmoji = color === 'red' ? '🔴' : color === 'black' ? '⚫' : '🟢';
-    const win = roulWin(bet, n);
-    const pay = roulPay(bet);
-    if (win) {
-      const w = applyWin(userId, amount * pay);
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🎡 Roulette — ชนะ!')
-        .setDescription(`ลูกหยุดที่: **${n}** ${colorEmoji}\nเดิมพัน: **${bet}** (${pay}x)\n\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} 🪙**`)] });
-    }
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🎡 Roulette — แพ้')
-      .setDescription(`ลูกหยุดที่: **${n}** ${colorEmoji}\nเดิมพัน: **${bet}**\n\n-${amount.toLocaleString()} Gold\nยอดรวม: **${rlLoss.gold.toLocaleString()} 🪙**`)] });
-  }
-
-  // /give (Staff)
-  if (cmd === 'give') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ Staff เท่านั้นครับ', ephemeral: true });
-    const target = interaction.options.getUser('user');
-    const currency = interaction.options.getString('currency');
-    const amount = interaction.options.getInteger('amount');
-    const tp = getPlayer(target.id);
-    if (currency === 'gold') updatePlayer(target.id, { gold: tp.gold + amount });
-    else updatePlayer(target.id, { rc: tp.rc + amount });
-    const symbol = currency === 'gold' ? '🪙 Gold' : '🌈 RC';
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('💰 แจกเงิน')
-      .setDescription(`แจก **${amount.toLocaleString()} ${symbol}** ให้ <@${target.id}> แล้วครับ`)] });
-  }
-
-  // /gift (Staff)
-  if (cmd === 'gift') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ Staff เท่านั้นครับ', ephemeral: true });
-    const target = interaction.options.getUser('user');
-    const item = interaction.options.getString('item');
-    const amount = interaction.options.getInteger('amount');
-    const tp = getPlayer(target.id);
-    if (item === 'reroll') updatePlayer(target.id, { inv_reroll: tp.inv_reroll + amount });
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff).setTitle('🎁 แจกไอเทม')
-      .setDescription(`แจก **🎲 Re-roll x${amount}** ให้ <@${target.id}> แล้วครับ`)] });
-  }
-
-  // /inspect (Staff)
-  if (cmd === 'inspect') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ Staff เท่านั้นครับ', ephemeral: true });
-    const target = interaction.options.getUser('user');
-    const tp = getPlayer(target.id);
-    const pool = getPool();
-    const bar = Array.from({length:7}, (_,i) => i < tp.streak ? '⭐' : '☆').join(' ');
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xffa500).setTitle(`🔍 [Staff] Inventory ของ ${target.username}`)
-      .addFields(
-        { name: '💰 ยอดเงิน', value: `🪙 Gold: **${tp.gold.toLocaleString()}**
-🌈 RC: **${tp.rc.toLocaleString()}**
-📊 ชนะวันนี้: ${tp.win_today.toLocaleString()}/${WIN_CAP.toLocaleString()}`, inline: true },
-        { name: '🎒 Items', value: `🎲 Re-roll: **x${tp.inv_reroll}**`, inline: true },
-        { name: '📅 Daily Streak', value: `${bar}
-${tp.streak}/7 วัน
-รับล่าสุด: ${tp.last_daily || 'ยังไม่เคย'}`, inline: false },
-      )], ephemeral: true });
-  }
-
-  // /take (Staff)
-  if (cmd === 'take') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ Staff เท่านั้นครับ', ephemeral: true });
-    const target = interaction.options.getUser('user');
-    const currency = interaction.options.getString('currency');
-    const amount = interaction.options.getInteger('amount');
-    const tp = getPlayer(target.id);
-    if (currency === 'gold') {
-      const deduct = Math.min(amount, tp.gold);
-      updatePlayer(target.id, { gold: tp.gold - deduct });
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('💸 [Staff] ลบเงิน')
-        .setDescription(`ลบ **${deduct.toLocaleString()} 🪙 Gold** จาก <@${target.id}>
-เหลือ: **${(tp.gold - deduct).toLocaleString()}**`)] });
-    } else {
-      const deduct = Math.min(amount, tp.rc);
-      updatePlayer(target.id, { rc: tp.rc - deduct });
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('💸 [Staff] ลบเงิน')
-        .setDescription(`ลบ **${deduct.toLocaleString()} 🌈 RC** จาก <@${target.id}>
-เหลือ: **${(tp.rc - deduct).toLocaleString()}**`)] });
-    }
-  }
-
-  // /revoke (Staff)
-  if (cmd === 'revoke') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ Staff เท่านั้นครับ', ephemeral: true });
-    const target = interaction.options.getUser('user');
-    const item = interaction.options.getString('item');
-    const amount = interaction.options.getInteger('amount');
-    const tp = getPlayer(target.id);
-    if (item === 'reroll') {
-      const deduct = Math.min(amount, tp.inv_reroll);
-      updatePlayer(target.id, { inv_reroll: tp.inv_reroll - deduct });
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🗑️ [Staff] ลบไอเทม')
-        .setDescription(`ลบ **🎲 Re-roll x${deduct}** จาก <@${target.id}>
-เหลือ: **x${tp.inv_reroll - deduct}**`)] });
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setColor(0xbb88ff).setTitle('ใช้ Re-roll')
+          .setDescription(`ใช้ Re-roll แล้วครับ!\nเหลือ: **x${p.inv_reroll - 1}**`)
+      ] });
     }
   }
 
@@ -693,95 +517,299 @@ ${tp.streak}/7 วัน
   if (cmd === 'transfer') {
     const target = interaction.options.getUser('user');
     const amount = interaction.options.getInteger('amount');
-    if (target.id === userId) return interaction.reply({ content: '❌ โอนให้ตัวเองไม่ได้ครับ', ephemeral: true });
-    if (target.bot) return interaction.reply({ content: '❌ โอนให้บอทไม่ได้ครับ', ephemeral: true });
+    if (target.id === userId) return interaction.reply({ content: 'โอนให้ตัวเองไม่ได้ครับ', ephemeral: true });
+    if (target.bot) return interaction.reply({ content: 'โอนให้บอทไม่ได้ครับ', ephemeral: true });
     const p = getPlayer(userId);
-    if (p.gold < amount) return interaction.reply({ content: `❌ Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, ephemeral: true });
+    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, ephemeral: true });
     const tp = getPlayer(target.id);
     updatePlayer(userId, { gold: p.gold - amount });
     updatePlayer(target.id, { gold: tp.gold + amount });
-    const pAfter = getPlayer(userId);
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('💸 โอน Gold')
-      .setDescription(`โอน **${amount.toLocaleString()} 🪙 Gold** ให้ <@${target.id}> แล้วครับ
-Gold เหลือ: **${pAfter.gold.toLocaleString()}**`)] });
+    const fresh = getPlayer(userId);
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0x57f287).setTitle('โอน Gold')
+        .setDescription(`โอน **${amount.toLocaleString()} Gold** ให้ <@${target.id}> แล้วครับ\nGold เหลือ: **${fresh.gold.toLocaleString()}**`)
+    ] });
+  }
+
+  // /coinflip
+  if (cmd === 'coinflip') {
+    const p = getPlayer(userId);
+    const amount = interaction.options.getInteger('amount');
+    const choice = interaction.options.getString('choice');
+    const loss = applyLoss(userId, amount);
+    if (!loss.ok) return interaction.reply({ content: loss.reason, ephemeral: true });
+    const win = randF() < 0.45;
+    const result = win ? choice : (choice === 'heads' ? 'tails' : 'heads');
+    const emoji = result === 'heads' ? 'Heads' : 'Tails';
+    if (win) {
+      const w = applyWin(userId, amount, 2);
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setColor(0x57f287).setTitle(`Coinflip — ชนะ!`)
+          .setDescription(`ผล: **${emoji}**\n\n+${w.profit.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} Gold**`)
+      ] });
+    }
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0xed4245).setTitle(`Coinflip — แพ้`)
+        .setDescription(`ผล: **${emoji}**\n\n-${amount.toLocaleString()} Gold\nยอดรวม: **${loss.gold.toLocaleString()} Gold**`)
+    ] });
+  }
+
+  // /slots
+  if (cmd === 'slots') {
+    const amount = interaction.options.getInteger('amount');
+    const loss = applyLoss(userId, amount);
+    if (!loss.ok) return interaction.reply({ content: loss.reason, ephemeral: true });
+    const contrib = Math.floor(amount * POOL_CONTRIB);
+    setPool(getPool() + contrib);
+    const forceWin = randF() < 0.35;
+    let reels = [spinSlot(), spinSlot(), spinSlot()];
+    if (forceWin) { const s = spinSlot(); reels = [s, s, s]; }
+    else { while (reels[0] === reels[1] && reels[1] === reels[2]) reels[2] = spinSlot(); }
+    const pool = getPool();
+    const isJP = forceWin && reels[0] === 'seven' && pool > 0;
+    const reelStr = reels.map(r => SLOT_EMOJI[r]).join('  ');
+
+    if (isJP) {
+      const jpAmt = pool * JACKPOT_MULT;
+      const taxed = Math.floor(jpAmt * (1 - TAX));
+      setPool(0);
+      const p2 = getPlayer(userId);
+      updatePlayer(userId, { gold: p2.gold + taxed, win_today: Math.min(p2.win_today + jpAmt, WIN_CAP) });
+      const fresh = getPlayer(userId);
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setColor(0xffd700).setTitle('JACKPOT!!!')
+          .setDescription(`${reelStr}\n\n7 7 7 — JACKPOT!\nPool: ${pool.toLocaleString()} x ${JACKPOT_MULT}\nหัก Tax -> +${taxed.toLocaleString()} Gold\nยอดรวม: **${fresh.gold.toLocaleString()} Gold**`)
+      ] });
+    }
+    if (forceWin) {
+      const mult = SLOT_MULT[reels[0]];
+      const w = applyWin(userId, amount, mult);
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setColor(0x57f287).setTitle('Slots — ชนะ!')
+          .setDescription(`${reelStr}\n\n${reels.map(r => SLOT_EMOJI[r]).join('')} — ${mult}x!\n+${w.profit.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} Gold**`)
+      ] });
+    }
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0xed4245).setTitle('Slots')
+        .setDescription(`${reelStr}\n\nไม่ match — -${amount.toLocaleString()} Gold\n(${contrib} เข้า Jackpot Pool)\nPool: ${getPool().toLocaleString()}\nยอดรวม: **${loss.gold.toLocaleString()} Gold**`)
+    ] });
+  }
+
+  // /blackjack
+  if (cmd === 'blackjack') {
+    if (bjGames.has(userId)) return interaction.reply({ content: 'มีเกม Blackjack ค้างอยู่ครับ', ephemeral: true });
+    const amount = interaction.options.getInteger('amount');
+    const loss = applyLoss(userId, amount);
+    if (!loss.ok) return interaction.reply({ content: loss.reason, ephemeral: true });
+    const deck = makeDeck();
+    const game = { amount, deck, player: [deck.pop(), deck.pop()], dealer: [deck.pop(), deck.pop()], userId };
+    const pv = handVal(game.player);
+    if (pv === 21) {
+      const w = applyWin(userId, amount, 2.5);
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setColor(0x57f287).setTitle('BLACKJACK! 21!')
+          .setDescription(`ไพ่คุณ: ${game.player.map(c => cardStr(c)).join(' ')}\n\nBLACKJACK! ชนะ 2.5x!\n+${w.profit.toLocaleString()} Gold\nยอดรวม: **${w.gold.toLocaleString()} Gold**`)
+      ] });
+    }
+    bjGames.set(userId, game);
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`bj_hit_${userId}`).setLabel('Hit').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`bj_stand_${userId}`).setLabel('Stand').setStyle(ButtonStyle.Danger),
+    );
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0x5865f2).setTitle('Blackjack')
+        .setDescription(`Dealer: ${cardStr(game.dealer[0])} ??\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}`)
+    ], components: [row] });
+  }
+
+  // /roulette
+  if (cmd === 'roulette') {
+    const amount = interaction.options.getInteger('amount');
+    const bet = interaction.options.getString('bet').toLowerCase();
+    const validBets = ['red','black','odd','even','1-18','19-36'];
+    const isNumBet = !isNaN(parseInt(bet)) && parseInt(bet) >= 0 && parseInt(bet) <= 36;
+    if (!validBets.includes(bet) && !isNumBet) return interaction.reply({ content: 'bet ไม่ถูกต้องครับ\nตัวเลือก: red black odd even 1-18 19-36 หรือ 0-36', ephemeral: true });
+    const loss = applyLoss(userId, amount);
+    if (!loss.ok) return interaction.reply({ content: loss.reason, ephemeral: true });
+    const n = rand(0, 36);
+    const color = roulColor(n);
+    const emoji = color === 'red' ? 'Red' : color === 'black' ? 'Black' : 'Green';
+    const win = roulWin(bet, n);
+    const pay = roulPay(bet);
+    if (win) {
+      const w = applyWin(userId, amount, pay);
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setColor(0x57f287).setTitle('Roulette — ชนะ!')
+          .setDescription(`ลูกหยุดที่: **${n}** (${emoji})\nเดิมพัน: **${bet}** (${pay}x)\n\n+${w.profit.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} Gold**`)
+      ] });
+    }
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0xed4245).setTitle('Roulette — แพ้')
+        .setDescription(`ลูกหยุดที่: **${n}** (${emoji})\nเดิมพัน: **${bet}**\n\n-${amount.toLocaleString()} Gold\nยอดรวม: **${loss.gold.toLocaleString()} Gold**`)
+    ] });
   }
 
   // /help
   if (cmd === 'help') {
-    const BOTNAME = "St. Elmo's Fire";
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff)
-      .setTitle(`⚡ ${BOTNAME} — คำสั่งทั้งหมด`)
-      .addFields(
-        { name: '🎲 Roll', value: '/roll [expression] — ทอยลูกเต๋า
-!r [expression] — ทอยแบบ prefix', inline: false },
-        { name: '💰 เงิน & ไอเทม', value: '/daily — รับรางวัลประจำวัน (รีเซ็ตตี 4)
-/inventory — ดูกระเป๋า
-/convert amount — แลก 3 Gold → 1 RC
-/use item:reroll — ใช้ Re-roll
-/transfer @user amount — โอน Gold', inline: false },
-        { name: '🎰 เกมพนัน', value: '/coinflip amount choice — ทอยเหรียญ (45% ชนะ 2x)
-/slots amount — สล็อต (35% ชนะ + Jackpot)
-/blackjack amount — แบล็คแจ็ค (45% ชนะ 2x)
-/roulette amount bet — รูเล็ต (2x-35x)', inline: false },
-        { name: '📊 กฎพนัน', value: 'Tax 3% จากเงินที่ชนะ
-Win Cap 10,000 Gold/วัน
-Slots Pool สะสม 5% จากทุกการแพ้', inline: false },
-        { name: '🛡️ Staff เท่านั้น', value: '/give @user currency amount — แจกเงิน
-/gift @user item amount — แจกไอเทม
-/take @user currency amount — ลบเงิน
-/revoke @user item amount — ลบไอเทม
-/inspect @user — ดู inventory สมาชิก', inline: false },
-      )] });
-  }}
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0xbb88ff).setTitle(`${BOTNAME} — คำสั่งทั้งหมด`)
+        .addFields(
+          { name: 'Roll', value: '/roll [expression] — ทอยลูกเต๋า\n!r [expression] — prefix command', inline: false },
+          { name: 'เงิน & ไอเทม', value: '/daily — รับรางวัลประจำวัน (รีเซ็ตตี 4)\n/inventory — ดูกระเป๋า\n/convert amount — แลก 3 Gold = 1 RC\n/use item:reroll — ใช้ Re-roll\n/transfer @user amount — โอน Gold', inline: false },
+          { name: 'เกมพนัน', value: '/coinflip amount choice — ทอยเหรียญ 45% ชนะ 2x\n/slots amount — สล็อต 35% ชนะ + Jackpot\n/blackjack amount — แบล็คแจ็ค 45% ชนะ 2x\n/roulette amount bet — รูเล็ต 2x-36x', inline: false },
+          { name: 'กฎพนัน', value: 'Tax 3% จากกำไรที่ได้\nWin Cap 10,000 Gold ต่อวัน\nSlots Pool สะสม 5% จากทุกการแพ้', inline: false },
+          { name: 'Staff เท่านั้น', value: '/give @user currency amount — แจกเงิน\n/gift @user item amount — แจกไอเทม\n/take @user currency amount — ลบเงิน\n/revoke @user item amount — ลบไอเทม\n/inspect @user — ดู inventory สมาชิก', inline: false },
+        )
+    ] });
+  }
 
-// ── Blackjack buttons ──────────────────────────
+  // /give
+  if (cmd === 'give') {
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
+    const target = interaction.options.getUser('user');
+    const currency = interaction.options.getString('currency');
+    const amount = interaction.options.getInteger('amount');
+    const tp = getPlayer(target.id);
+    if (currency === 'gold') updatePlayer(target.id, { gold: tp.gold + amount });
+    else updatePlayer(target.id, { rc: tp.rc + amount });
+    const label = currency === 'gold' ? `${amount.toLocaleString()} Gold` : `${amount.toLocaleString()} RC`;
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0xffd700).setTitle('Staff — แจกเงิน')
+        .setDescription(`แจก **${label}** ให้ <@${target.id}> แล้วครับ`)
+    ] });
+  }
+
+  // /gift
+  if (cmd === 'gift') {
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
+    const target = interaction.options.getUser('user');
+    const item = interaction.options.getString('item');
+    const amount = interaction.options.getInteger('amount');
+    const tp = getPlayer(target.id);
+    if (item === 'reroll') updatePlayer(target.id, { inv_reroll: tp.inv_reroll + amount });
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0xbb88ff).setTitle('Staff — แจกไอเทม')
+        .setDescription(`แจก **Re-roll x${amount}** ให้ <@${target.id}> แล้วครับ`)
+    ] });
+  }
+
+  // /take
+  if (cmd === 'take') {
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
+    const target = interaction.options.getUser('user');
+    const currency = interaction.options.getString('currency');
+    const amount = interaction.options.getInteger('amount');
+    const tp = getPlayer(target.id);
+    if (currency === 'gold') {
+      const deduct = Math.min(amount, tp.gold);
+      updatePlayer(target.id, { gold: tp.gold - deduct });
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setColor(0xed4245).setTitle('Staff — ลบเงิน')
+          .setDescription(`ลบ **${deduct.toLocaleString()} Gold** จาก <@${target.id}>\nเหลือ: **${(tp.gold - deduct).toLocaleString()}**`)
+      ] });
+    } else {
+      const deduct = Math.min(amount, tp.rc);
+      updatePlayer(target.id, { rc: tp.rc - deduct });
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setColor(0xed4245).setTitle('Staff — ลบเงิน')
+          .setDescription(`ลบ **${deduct.toLocaleString()} RC** จาก <@${target.id}>\nเหลือ: **${(tp.rc - deduct).toLocaleString()}**`)
+      ] });
+    }
+  }
+
+  // /revoke
+  if (cmd === 'revoke') {
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
+    const target = interaction.options.getUser('user');
+    const item = interaction.options.getString('item');
+    const amount = interaction.options.getInteger('amount');
+    const tp = getPlayer(target.id);
+    if (item === 'reroll') {
+      const deduct = Math.min(amount, tp.inv_reroll);
+      updatePlayer(target.id, { inv_reroll: tp.inv_reroll - deduct });
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setColor(0xed4245).setTitle('Staff — ลบไอเทม')
+          .setDescription(`ลบ **Re-roll x${deduct}** จาก <@${target.id}>\nเหลือ: **x${tp.inv_reroll - deduct}**`)
+      ] });
+    }
+  }
+
+  // /inspect
+  if (cmd === 'inspect') {
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
+    const target = interaction.options.getUser('user');
+    const tp = getPlayer(target.id);
+    const bar = Array.from({ length: 7 }, (_, i) => i < tp.streak ? '⭐' : '☆').join(' ');
+    return interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0xffa500).setTitle(`Staff — Inventory ของ ${target.username}`)
+        .addFields(
+          { name: 'ยอดเงิน', value: `Gold: **${tp.gold.toLocaleString()}**\nRC: **${tp.rc.toLocaleString()}**\nชนะวันนี้: ${tp.win_today.toLocaleString()}/${WIN_CAP.toLocaleString()}`, inline: true },
+          { name: 'Items', value: `Re-roll: **x${tp.inv_reroll}**`, inline: true },
+          { name: 'Daily Streak', value: `${bar}\n${tp.streak}/7 วัน\nรับล่าสุด: ${tp.last_daily || 'ยังไม่เคย'}`, inline: false },
+        )
+    ], ephemeral: true });
+  }
+}
+
+// ══════════════════════════════════════════════
+//  BLACKJACK BUTTONS
+// ══════════════════════════════════════════════
 async function handleButton(interaction) {
   const id = interaction.customId;
   const userId = interaction.user.id;
-
   if (!id.startsWith('bj_')) return;
-  if (!id.endsWith(userId)) return interaction.reply({ content: '❌ นี่ไม่ใช่เกมของคุณครับ', ephemeral: true });
-
+  if (!id.endsWith(userId)) return interaction.reply({ content: 'นี่ไม่ใช่เกมของคุณครับ', ephemeral: true });
   const game = bjGames.get(userId);
-  if (!game) return interaction.reply({ content: '❌ ไม่พบเกม Blackjack ครับ', ephemeral: true });
-  const p = getPlayer(userId);
+  if (!game) return interaction.reply({ content: 'ไม่พบเกม Blackjack ครับ', ephemeral: true });
 
   if (id.startsWith('bj_hit_')) {
     game.player.push(game.deck.pop());
     const pv = handVal(game.player);
     if (pv > 21) {
       bjGames.delete(userId);
-      const pBust = getPlayer(userId);
-      return interaction.update({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🃏 Blackjack — แพ้ (Bust)')
-        .setDescription(`ไพ่คุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\n**เกิน 21!** -${game.amount.toLocaleString()} Gold\nยอดรวม: **${pBust.gold.toLocaleString()} 🪙**`)], components: [] });
+      const fresh = getPlayer(userId);
+      return interaction.update({ embeds: [
+        new EmbedBuilder().setColor(0xed4245).setTitle('Blackjack — แพ้ (Bust)')
+          .setDescription(`ไพ่คุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\nเกิน 21! -${game.amount.toLocaleString()} Gold\nยอดรวม: **${fresh.gold.toLocaleString()} Gold**`)
+      ], components: [] });
     }
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`bj_hit_${userId}`).setLabel('🃏 Hit').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`bj_stand_${userId}`).setLabel('✋ Stand').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`bj_hit_${userId}`).setLabel('Hit').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`bj_stand_${userId}`).setLabel('Stand').setStyle(ButtonStyle.Danger),
     );
-    return interaction.update({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('🃏 Blackjack')
-      .setDescription(`**Dealer:** ${cardStr(game.dealer[0])} ??\n**คุณ (${pv}):** ${game.player.map(c => cardStr(c)).join(' ')}`)], components: [row] });
+    return interaction.update({ embeds: [
+      new EmbedBuilder().setColor(0x5865f2).setTitle('Blackjack')
+        .setDescription(`Dealer: ${cardStr(game.dealer[0])} ??\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}`)
+    ], components: [row] });
   }
 
   if (id.startsWith('bj_stand_')) {
     bjGames.delete(userId);
     while (handVal(game.dealer) < 17) game.dealer.push(game.deck.pop());
     const pv = handVal(game.player), dv = handVal(game.dealer);
+    const dealerStr = `Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}`;
+    const playerStr = `คุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}`;
     if (dv > 21 || pv > dv) {
-      const w = applyWin(userId, game.amount * 2);
-      return interaction.update({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🃏 Blackjack — ชนะ!')
-        .setDescription(`Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\n+${w.taxed.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} 🪙**`)], components: [] });
+      const w = applyWin(userId, game.amount, 2);
+      return interaction.update({ embeds: [
+        new EmbedBuilder().setColor(0x57f287).setTitle('Blackjack — ชนะ!')
+          .setDescription(`${dealerStr}\n${playerStr}\n\n+${w.profit.toLocaleString()} Gold (หัก Tax 3%)\nยอดรวม: **${w.gold.toLocaleString()} Gold**`)
+      ], components: [] });
     }
     if (pv === dv) {
-      const pTie = getPlayer(userId);
-      updatePlayer(userId, { gold: pTie.gold + game.amount });
-      const pTieAfter = getPlayer(userId);
-      return interaction.update({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('🃏 Blackjack — เสมอ')
-        .setDescription(`Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\nคืนเงิน ${game.amount.toLocaleString()} Gold\nยอดรวม: **${pTieAfter.gold.toLocaleString()} 🪙**`)], components: [] });
+      const p = getPlayer(userId);
+      updatePlayer(userId, { gold: p.gold + game.amount });
+      const fresh = getPlayer(userId);
+      return interaction.update({ embeds: [
+        new EmbedBuilder().setColor(0x5865f2).setTitle('Blackjack — เสมอ')
+          .setDescription(`${dealerStr}\n${playerStr}\n\nคืนเงิน ${game.amount.toLocaleString()} Gold\nยอดรวม: **${fresh.gold.toLocaleString()} Gold**`)
+      ], components: [] });
     }
-    const pLose = getPlayer(userId);
-    return interaction.update({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🃏 Blackjack — แพ้')
-      .setDescription(`Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}\nคุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}\n\n-${game.amount.toLocaleString()} Gold\nยอดรวม: **${pLose.gold.toLocaleString()} 🪙**`)], components: [] });
+    const fresh = getPlayer(userId);
+    return interaction.update({ embeds: [
+      new EmbedBuilder().setColor(0xed4245).setTitle('Blackjack — แพ้')
+        .setDescription(`${dealerStr}\n${playerStr}\n\n-${game.amount.toLocaleString()} Gold\nยอดรวม: **${fresh.gold.toLocaleString()} Gold**`)
+    ], components: [] });
   }
 }
 
