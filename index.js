@@ -708,30 +708,31 @@ Gold เหลือ: **${pAfter.gold.toLocaleString()}**`)] });
 
   // /help
   if (cmd === 'help') {
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff).setTitle('⚡ St. Elmo's Fire — คำสั่งทั้งหมด')
+    const BOTNAME = "St. Elmo's Fire";
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff)
+      .setTitle(`⚡ ${BOTNAME} — คำสั่งทั้งหมด`)
       .addFields(
-        { name: '🎲 Roll', value: '`/roll [expression]` — ทอยลูกเต๋า
-`!r [expression]` — ทอยแบบ prefix', inline: false },
-        { name: '💰 เงิน & ไอเทม', value: '`/daily` — รับรางวัลประจำวัน (รีเซ็ตตี 4)
-`/inventory` — ดูกระเป๋า
-`/convert amount` — แลก 3 Gold → 1 RC
-`/use item:reroll` — ใช้ Re-roll
-`/transfer @user amount` — โอน Gold', inline: false },
-        { name: '🎰 เกมพนัน', value: '`/coinflip amount choice` — ทอยเหรียญ (45% ชนะ 2x)
-`/slots amount` — สล็อต (35% ชนะ + Jackpot)
-`/blackjack amount` — แบล็คแจ็ค (45% ชนะ 2x)
-`/roulette amount bet` — รูเล็ต (2x-35x)', inline: false },
+        { name: '🎲 Roll', value: '/roll [expression] — ทอยลูกเต๋า
+!r [expression] — ทอยแบบ prefix', inline: false },
+        { name: '💰 เงิน & ไอเทม', value: '/daily — รับรางวัลประจำวัน (รีเซ็ตตี 4)
+/inventory — ดูกระเป๋า
+/convert amount — แลก 3 Gold → 1 RC
+/use item:reroll — ใช้ Re-roll
+/transfer @user amount — โอน Gold', inline: false },
+        { name: '🎰 เกมพนัน', value: '/coinflip amount choice — ทอยเหรียญ (45% ชนะ 2x)
+/slots amount — สล็อต (35% ชนะ + Jackpot)
+/blackjack amount — แบล็คแจ็ค (45% ชนะ 2x)
+/roulette amount bet — รูเล็ต (2x-35x)', inline: false },
         { name: '📊 กฎพนัน', value: 'Tax 3% จากเงินที่ชนะ
 Win Cap 10,000 Gold/วัน
-Slots Jackpot Pool สะสม 5% จากทุกการแพ้', inline: false },
-        { name: '🛡️ Staff เท่านั้น', value: '`/give @user currency amount` — แจกเงิน
-`/gift @user item amount` — แจกไอเทม
-`/take @user currency amount` — ลบเงิน
-`/revoke @user item amount` — ลบไอเทม
-`/inspect @user` — ดู inventory สมาชิก', inline: false },
-      )], ephemeral: false });
-  }
-}
+Slots Pool สะสม 5% จากทุกการแพ้', inline: false },
+        { name: '🛡️ Staff เท่านั้น', value: '/give @user currency amount — แจกเงิน
+/gift @user item amount — แจกไอเทม
+/take @user currency amount — ลบเงิน
+/revoke @user item amount — ลบไอเทม
+/inspect @user — ดู inventory สมาชิก', inline: false },
+      )] });
+  }}
 
 // ── Blackjack buttons ──────────────────────────
 async function handleButton(interaction) {
