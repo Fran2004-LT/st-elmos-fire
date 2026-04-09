@@ -65,23 +65,23 @@ const BANNER_BASE = 'https://raw.githubusercontent.com/Fran2004-LT/st-elmos-fire
 
 const BANNERS = {
   // Common
-  turing_calm:     { name: 'Turing Calm',    img: `${BANNER_BASE}/Turing%20Calm.png`,     gradient: ['#E8B4B8','#CDB4DB'],                     rarity: 'C',       collection: 'lofy' },
-  euler_light:     { name: 'Euler Light',    img: `${BANNER_BASE}/Euler%20Light.png`,     gradient: ['#BDE0FE','#A7C7E7'],                     rarity: 'C',       collection: 'lofy' },
-  bernoulli_flow:  { name: 'Bernoulli Flow', img: `${BANNER_BASE}/Bernoulli%20Flow.png`,  gradient: ['#D8F3DC','#BDE0FE'],                     rarity: 'C',       collection: 'lofy' },
-  gauss_base:      { name: 'Gauss Base',     img: `${BANNER_BASE}/Gauss%20Base.png`,      gradient: ['#F5E6CC','#EDE0D4'],                     rarity: 'C',       collection: 'lofy' },
+  turing_calm:     { name: 'Turing Calm',    img: `${BANNER_BASE}/Turing_Calm.png`,     gradient: ['#E8B4B8','#CDB4DB'],                     rarity: 'C',       collection: 'lofy' },
+  euler_light:     { name: 'Euler Light',    img: `${BANNER_BASE}/Euler_Light.png`,     gradient: ['#BDE0FE','#A7C7E7'],                     rarity: 'C',       collection: 'lofy' },
+  bernoulli_flow:  { name: 'Bernoulli Flow', img: `${BANNER_BASE}/Bernoulli_Flow.png`,  gradient: ['#D8F3DC','#BDE0FE'],                     rarity: 'C',       collection: 'lofy' },
+  gauss_base:      { name: 'Gauss Base',     img: `${BANNER_BASE}/Gauss_Base.png`,      gradient: ['#F5E6CC','#EDE0D4'],                     rarity: 'C',       collection: 'lofy' },
   // Rare
-  noether_balance: { name: 'Noether Balance',img: `${BANNER_BASE}/Noether%20Balance.png`, gradient: ['#DEC4E8','#C4E8DC'],                     rarity: 'R',       collection: 'lofy' },
-  pascal_rise:     { name: 'Pascal Rise',    img: `${BANNER_BASE}/Pascal%20Rise.png`,     gradient: ['#FFB4A2','#FFD6A5'],                     rarity: 'R',       collection: 'lofy' },
-  hilbert_space:   { name: 'Hilbert Space',  img: `${BANNER_BASE}/Hilbert%20Space.png`,   gradient: ['#D6CADD','#CDB4DB'],                     rarity: 'R',       collection: 'lofy' },
-  fourier_wave:    { name: 'Fourier Wave',   img: `${BANNER_BASE}/Fourier%20Wave.png`,    gradient: ['#CFE8F9','#D8F3DC'],                     rarity: 'R',       collection: 'lofy' },
+  noether_balance: { name: 'Noether Balance',img: `${BANNER_BASE}/Noether_Balance.png`, gradient: ['#DEC4E8','#C4E8DC'],                     rarity: 'R',       collection: 'lofy' },
+  pascal_rise:     { name: 'Pascal Rise',    img: `${BANNER_BASE}/Pascal_Rise.png`,     gradient: ['#FFB4A2','#FFD6A5'],                     rarity: 'R',       collection: 'lofy' },
+  hilbert_space:   { name: 'Hilbert Space',  img: `${BANNER_BASE}/Hilbert_Space.png`,   gradient: ['#D6CADD','#CDB4DB'],                     rarity: 'R',       collection: 'lofy' },
+  fourier_wave:    { name: 'Fourier Wave',   img: `${BANNER_BASE}/Fourier_Wave.png`,    gradient: ['#CFE8F9','#D8F3DC'],                     rarity: 'R',       collection: 'lofy' },
   // Super Rare
-  tesla_pulse:     { name: 'Tesla Pulse',    img: `${BANNER_BASE}/Tesla%20Pulse.png`,     gradient: ['#E8B4B8','#BDE0FE','#CDB4DB'],           rarity: 'SR',      collection: 'lofy' },
-  curie_glow:      { name: 'Curie Glow',     img: `${BANNER_BASE}/Curie%20Glow.png`,     gradient: ['#D8F3DC','#F5E6CC','#FFB4A2'],           rarity: 'SR',      collection: 'lofy' },
-  feynman_drift:   { name: 'Feynman Drift',  img: `${BANNER_BASE}/Feynman%20Drift.png`,  gradient: ['#CFE8F9','#E8B4B8'],                     rarity: 'SR',      collection: 'lofy' },
+  tesla_pulse:     { name: 'Tesla Pulse',    img: `${BANNER_BASE}/Tesla_Pulse.png`,     gradient: ['#E8B4B8','#BDE0FE','#CDB4DB'],           rarity: 'SR',      collection: 'lofy' },
+  curie_glow:      { name: 'Curie Glow',     img: `${BANNER_BASE}/Curie_Glow.png`,     gradient: ['#D8F3DC','#F5E6CC','#FFB4A2'],           rarity: 'SR',      collection: 'lofy' },
+  feynman_drift:   { name: 'Feynman Drift',  img: `${BANNER_BASE}/Feynman_Drift.png`,  gradient: ['#CFE8F9','#E8B4B8'],                     rarity: 'SR',      collection: 'lofy' },
   // Ultra Rare
-  einstein_horizon:{ name: 'Einstein Horizon',img: `${BANNER_BASE}/Einstein%20Horizon.png`,gradient:['#F2F0FF','#E8F0FF','#FDECEF'],          rarity: 'UR',      collection: 'lofy' },
+  einstein_horizon:{ name: 'Einstein Horizon',img: `${BANNER_BASE}/Einstein_Horizon.png`,gradient:['#F2F0FF','#E8F0FF','#FDECEF'],          rarity: 'UR',      collection: 'lofy' },
   // Eclipse
-  newton_prime:    { name: 'Newton Prime',   img: `${BANNER_BASE}/Newton%20Prime.png`,   gradient: ['#FFB4A2','#BDE0FE','#CDB4DB','#D8F3DC'], rarity: 'Eclipse', collection: 'lofy' },
+  newton_prime:    { name: 'Newton Prime',   img: `${BANNER_BASE}/Newton_Prime.png`,   gradient: ['#FFB4A2','#BDE0FE','#CDB4DB','#D8F3DC'], rarity: 'Eclipse', collection: 'lofy' },
 };
 
 // All emblem keys by rarity for gacha
