@@ -716,13 +716,14 @@ async function handleSlash(interaction) {
 
   // /inventory
   if (cmd === 'inventory') {
+    await interaction.deferReply();
     const p = getPlayer(userId);
     const ownedE = getOwnedEmblems(userId);
     const ownedB = getOwnedBanners(userId);
     const bar = Array.from({length:7}, (_,i) => i < p.streak ? '⭐' : '☆').join(' ');
     const emblemName = p.equipped_emblem === 'default' ? 'Default' : EMBLEMS[p.equipped_emblem]?.name || 'Default';
     const bannerName = p.equipped_banner === 'default' ? 'Default' : BANNERS[p.equipped_banner]?.name || 'Default';
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(color).setTitle(`Inventory — ${username}`)
+    return interaction.editReply({ embeds: [new EmbedBuilder().setColor(color).setTitle(`Inventory — ${username}`)
       .addFields(
         { name: 'ยอดเงิน', value: `Gold: **${p.gold.toLocaleString()}**\nRC: **${p.rc.toLocaleString()}**\nชนะวันนี้: ${p.win_today.toLocaleString()}/${WIN_CAP.toLocaleString()}`, inline: true },
         { name: 'Items', value: `Re-roll: **x${p.inv_reroll}**\nEmblem Shard: **x${p.inv_emblem_shard}**\nBanner Shard: **x${p.inv_banner_shard}**`, inline: true },
@@ -747,20 +748,21 @@ async function handleSlash(interaction) {
 
   // /use
   if (cmd === 'use') {
+    await interaction.deferReply();
     const p = getPlayer(userId);
     const item = interaction.options.getString('item');
     const amount = interaction.options.getInteger('amount') || 1;
 
     if (item === 'reroll') {
-      if (p.inv_reroll < 1) return interaction.reply({ content: 'ไม่มี Re-roll ครับ', ephemeral: true });
+      if (p.inv_reroll < 1) return interaction.editReply({ content: 'ไม่มี Re-roll ครับ' });
       updatePlayer(userId, { inv_reroll: p.inv_reroll - 1 });
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(color).setTitle('ใช้ Re-roll').setDescription(`ใช้ Re-roll แล้วครับ!\nเหลือ: **x${p.inv_reroll - 1}**`)] });
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(color).setTitle('ใช้ Re-roll').setDescription(`ใช้ Re-roll แล้วครับ!\nเหลือ: **x${p.inv_reroll - 1}**`)] });
     }
 
     // Box opening
     if (BOX_RATES[item]) {
       const boxKey = `box_${item}`;
-      if (p[boxKey] < amount) return interaction.reply({ content: `กล่องไม่พอครับ (มี ${p[boxKey]} ใบ)`, ephemeral: true });
+      if (p[boxKey] < amount) return interaction.editReply({ content: `กล่องไม่พอครับ (มี ${p[boxKey]} ใบ)` });
 
       const isMulti = amount === 10;
       const isEmblem = item.startsWith('divinitas');
@@ -824,27 +826,28 @@ async function handleSlash(interaction) {
         if (eclipseUnlocked) desc += `\n\n🌑 **Eclipse ปลดล็อคแล้ว!** Collection ครบ!`;
       }
 
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(color).setTitle(`🎁 ${BOX_NAMES[item]}`).setDescription(desc)] });
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(color).setTitle(`🎁 ${BOX_NAMES[item]}`).setDescription(desc)] });
     }
   }
 
   // /equip
   if (cmd === 'equip') {
+    await interaction.deferReply();
     const type = interaction.options.getString('type');
     const name = interaction.options.getString('name').toLowerCase().replace(/ /g, '_');
 
     if (type === 'emblem') {
       const owned = getOwnedEmblems(userId);
-      if (!EMBLEMS[name]) return interaction.reply({ content: 'ไม่พบ emblem นี้ครับ', ephemeral: true });
-      if (!owned.includes(name)) return interaction.reply({ content: 'คุณยังไม่มี emblem นี้ครับ', ephemeral: true });
+      if (!EMBLEMS[name]) return interaction.editReply({ content: 'ไม่พบ emblem นี้ครับ' });
+      if (!owned.includes(name)) return interaction.editReply({ content: 'คุณยังไม่มี emblem นี้ครับ' });
       updatePlayer(userId, { equipped_emblem: name });
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(EMBLEMS[name].color).setTitle('Equip Emblem').setDescription(`เปลี่ยนเป็น **${EMBLEMS[name].name}** แล้วครับ!`)] });
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(EMBLEMS[name].color).setTitle('Equip Emblem').setDescription(`เปลี่ยนเป็น **${EMBLEMS[name].name}** แล้วครับ!`)] });
     } else {
       const owned = getOwnedBanners(userId);
-      if (!BANNERS[name]) return interaction.reply({ content: 'ไม่พบ banner นี้ครับ', ephemeral: true });
-      if (!owned.includes(name)) return interaction.reply({ content: 'คุณยังไม่มี banner นี้ครับ', ephemeral: true });
+      if (!BANNERS[name]) return interaction.editReply({ content: 'ไม่พบ banner นี้ครับ' });
+      if (!owned.includes(name)) return interaction.editReply({ content: 'คุณยังไม่มี banner นี้ครับ' });
       updatePlayer(userId, { equipped_banner: name });
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(color).setTitle('Equip Banner').setDescription(`เปลี่ยนเป็น **${BANNERS[name].name}** แล้วครับ!`)] });
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(color).setTitle('Equip Banner').setDescription(`เปลี่ยนเป็น **${BANNERS[name].name}** แล้วครับ!`)] });
     }
   }
 
