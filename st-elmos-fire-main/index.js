@@ -1,4 +1,4 @@
-// index.js — St. Elmo's Fire v4.0
+// index.js — St. Elmo's Fire v5.0
 // Full system: Roll, Economy, Gambling, Emblem, Banner, Gacha
 // CSPRNG: crypto.randomInt() | Storage: SQLite
 
@@ -121,12 +121,12 @@ const RARITY_LABEL = { C: '⬜ Common', R: '💙 Rare', SR: '💜 Super Rare', U
 
 // Box rates [C, R, SR, UR, Salt] in %
 const BOX_RATES = {
-  divinitas_normal:  { cost: 150,  rates: [45, 25, 10,  2, 18], jackpot: 1/300000, multi_guarantee: 'R'  },
-  divinitas_mid:     { cost: 300,  rates: [25, 30, 22,  8, 15], jackpot: 1/150000, multi_guarantee: 'SR' },
-  divinitas_umazing: { cost: 1500, rates: [ 0, 20, 55, 25,  0], jackpot: 1/30000,  multi_guarantee: 'UR' },
-  lofy_normal:       { cost: 150,  rates: [45, 25, 10,  2, 18], jackpot: 1/300000, multi_guarantee: 'R'  },
-  lofy_mid:          { cost: 300,  rates: [25, 30, 22,  8, 15], jackpot: 1/150000, multi_guarantee: 'SR' },
-  lofy_umazing:      { cost: 1500, rates: [ 0, 20, 55, 25,  0], jackpot: 1/30000,  multi_guarantee: 'UR' },
+  divinitas_normal:  { cost: 150,  rates: [45, 23,  8, 0.5, 23.5], jackpot: 1/300000, multi_guarantee: 'R'  },
+  divinitas_mid:     { cost: 300,  rates: [28, 28, 18,   5,   21], jackpot: 1/150000, multi_guarantee: 'SR' },
+  divinitas_umazing: { cost: 1500, rates: [ 0, 18, 52,  20,   10], jackpot: 1/30000,  multi_guarantee: 'UR' },
+  lofy_normal:       { cost: 150,  rates: [45, 23,  8, 0.5, 23.5], jackpot: 1/300000, multi_guarantee: 'R'  },
+  lofy_mid:          { cost: 300,  rates: [28, 28, 18,   5,   21], jackpot: 1/150000, multi_guarantee: 'SR' },
+  lofy_umazing:      { cost: 1500, rates: [ 0, 18, 52,  20,   10], jackpot: 1/30000,  multi_guarantee: 'UR' },
 };
 
 const BOX_NAMES = {
@@ -485,7 +485,7 @@ function buildDiceText(parsed, tokens) {
 }
 
 async function generateBannerCard(bannerImg, username, expr, grand, breakdown, emblemColor) {
-  const W = 520, H = 160;
+  const W = 600, H = 200;  // ใหญ่ขึ้น
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
 
@@ -494,7 +494,6 @@ async function generateBannerCard(bannerImg, username, expr, grand, breakdown, e
     const img = await loadImage(bannerImg);
     ctx.drawImage(img, 0, 0, W, H);
   } catch (e) {
-    // fallback gradient
     const grad = ctx.createLinearGradient(0, 0, W, H);
     grad.addColorStop(0, '#1a1a2e');
     grad.addColorStop(1, '#2d2d44');
@@ -502,43 +501,43 @@ async function generateBannerCard(bannerImg, username, expr, grand, breakdown, e
     ctx.fillRect(0, 0, W, H);
   }
 
-  // Dark overlay left side for readability
-  const overlay = ctx.createLinearGradient(0, 0, W * 0.75, 0);
-  overlay.addColorStop(0, 'rgba(8,6,18,0.88)');
-  overlay.addColorStop(0.5, 'rgba(8,6,18,0.55)');
+  // Dark overlay ซ้าย
+  const overlay = ctx.createLinearGradient(0, 0, W * 0.72, 0);
+  overlay.addColorStop(0, 'rgba(8,6,18,0.92)');
+  overlay.addColorStop(0.55, 'rgba(8,6,18,0.6)');
   overlay.addColorStop(1, 'rgba(8,6,18,0)');
   ctx.fillStyle = overlay;
   ctx.fillRect(0, 0, W, H);
 
-  // Emblem color bar left
+  // Emblem color bar ซ้าย
   const hexColor = '#' + emblemColor.toString(16).padStart(6, '0');
   ctx.fillStyle = hexColor;
-  ctx.fillRect(0, 0, 4, H);
+  ctx.fillRect(0, 0, 5, H);
 
-  // Username
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = `13px ${CANVAS_FONT}`;
-  ctx.fillText(`@${username}`, 18, 26);
+  // Username — สีขาวอ่อน อ่านง่าย
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.font = `bold 15px ${CANVAS_FONT}`;
+  ctx.fillText(`@${username}`, 20, 32);
 
-  // Expression
-  ctx.fillStyle = 'rgba(187,136,255,0.55)';
-  ctx.font = `10px ${CANVAS_FONT}`;
-  ctx.fillText(expr, 18, 44);
+  // Expression — สีเทาอ่อน ไม่กลืนพื้น
+  ctx.fillStyle = 'rgba(220,220,220,0.65)';
+  ctx.font = `12px ${CANVAS_FONT}`;
+  ctx.fillText(expr, 20, 54);
 
   // Divider
-  ctx.fillStyle = 'rgba(255,255,255,0.2)';
-  ctx.fillRect(18, 52, 48, 1);
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.fillRect(20, 64, 56, 1);
 
-  // Grand total
+  // Grand total — ใหญ่ขึ้น
   ctx.fillStyle = '#ffffff';
-  ctx.font = `bold 52px ${CANVAS_FONT}`;
-  ctx.fillText(`${grand}`, 18, 108);
+  ctx.font = `bold 68px ${CANVAS_FONT}`;
+  ctx.fillText(`${grand}`, 20, 145);
 
-  // Breakdown
-  ctx.fillStyle = 'rgba(187,136,255,0.6)';
-  ctx.font = `11px ${CANVAS_FONT}`;
-  const breakStr = breakdown.slice(0, 45);
-  ctx.fillText(breakStr, 18, 130);
+  // Breakdown — สีเทาอ่อน อ่านง่ายขึ้น
+  ctx.fillStyle = 'rgba(210,210,210,0.7)';
+  ctx.font = `13px ${CANVAS_FONT}`;
+  const breakStr = breakdown.slice(0, 52);
+  ctx.fillText(breakStr, 20, 172);
 
   return canvas.toBuffer('image/png');
 }
@@ -631,7 +630,7 @@ function roulWin(bet, n) {
   if (!isNaN(parseInt(bet))) return parseInt(bet) === n;
   return false;
 }
-function roulPay(bet) { return ['red','black','odd','even','1-18','19-36'].includes(bet) ? 2 : 36; }
+function roulPay(bet) { return ['red','black','odd','even','1-18','19-36'].includes(bet) ? 2 : 35; }
 
 // ══════════════════════════════════════════════
 //  SLASH COMMANDS
@@ -667,7 +666,7 @@ const commands = [
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน Gold').setRequired(true).setMinValue(3)),
 
   new SlashCommandBuilder().setName('use').setDescription('ใช้ไอเทมหรือเปิดกล่อง')
-    .addStringOption(o => o.setName('item').setDescription('ไอเทม').setRequired(true).addChoices(...USE_CHOICES))
+    .addStringOption(o => o.setName('item').setDescription('ชื่อไอเทมหรือกล่อง').setRequired(true))
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน (สูงสุด 10 กล่อง)').setRequired(false).setMinValue(1).setMaxValue(10)),
 
   new SlashCommandBuilder().setName('equip').setDescription('เปลี่ยน emblem หรือ banner')
@@ -704,10 +703,39 @@ const commands = [
         { name: 'กล่องสุ่ม (Gacha Boxes)', value: 'boxes' },
       )),
 
-  new SlashCommandBuilder().setName('buy').setDescription('ซื้อ emblem หรือ banner ด้วย RC')
-    .addStringOption(o => o.setName('type').setDescription('emblem หรือ banner').setRequired(true)
-      .addChoices({ name: 'Emblem', value: 'emblem' }, { name: 'Banner', value: 'banner' }))
-    .addStringOption(o => o.setName('name').setDescription('ชื่อ emblem/banner').setRequired(true)),
+  new SlashCommandBuilder().setName('buy_emblem').setDescription('ซื้อ Emblem ด้วย RC')
+    .addStringOption(o => o.setName('name').setDescription('เลือก Emblem').setRequired(true)
+      .addChoices(
+        { name: 'Mars Ruber — 400 RC (C)', value: 'mars_ruber' },
+        { name: 'Neptunus Caeruleus — 400 RC (C)', value: 'neptunus_caeruleus' },
+        { name: 'Silvanus Viridis — 400 RC (C)', value: 'silvanus_viridis' },
+        { name: 'Bacchus Purpura — 400 RC (C)', value: 'bacchus_purpura' },
+        { name: 'Apollo Aureus — 650 RC (R)', value: 'apollo_aureus' },
+        { name: 'Venus Cyanis — 650 RC (R)', value: 'venus_cyanis' },
+        { name: 'Pluto Nox — 650 RC (R)', value: 'pluto_nox' },
+        { name: 'Ceres Flavus — 650 RC (R)', value: 'ceres_flavus' },
+        { name: 'Juno Regalis — 1,200 RC (SR)', value: 'juno_regalis' },
+        { name: 'Jupiter Rex — 1,200 RC (SR)', value: 'jupiter_rex' },
+        { name: 'Mercurius Noctis — 1,200 RC (SR)', value: 'mercurius_noctis' },
+        { name: 'Horus Nebula Rubra — 2,500 RC (UR)', value: 'horus_nebula_rubra' },
+      )),
+
+  new SlashCommandBuilder().setName('buy_banner').setDescription('ซื้อ Banner ด้วย RC')
+    .addStringOption(o => o.setName('name').setDescription('เลือก Banner').setRequired(true)
+      .addChoices(
+        { name: 'Turing Calm — 400 RC (C)', value: 'turing_calm' },
+        { name: 'Euler Light — 400 RC (C)', value: 'euler_light' },
+        { name: 'Bernoulli Flow — 400 RC (C)', value: 'bernoulli_flow' },
+        { name: 'Gauss Base — 400 RC (C)', value: 'gauss_base' },
+        { name: 'Noether Balance — 650 RC (R)', value: 'noether_balance' },
+        { name: 'Pascal Rise — 650 RC (R)', value: 'pascal_rise' },
+        { name: 'Hilbert Space — 650 RC (R)', value: 'hilbert_space' },
+        { name: 'Fourier Wave — 650 RC (R)', value: 'fourier_wave' },
+        { name: 'Tesla Pulse — 1,200 RC (SR)', value: 'tesla_pulse' },
+        { name: 'Curie Glow — 1,200 RC (SR)', value: 'curie_glow' },
+        { name: 'Feynman Drift — 1,200 RC (SR)', value: 'feynman_drift' },
+        { name: 'Einstein Horizon — 2,500 RC (UR)', value: 'einstein_horizon' },
+      )),
 
   new SlashCommandBuilder().setName('exchange').setDescription('แลก Shard เป็นกล่อง')
     .addStringOption(o => o.setName('type').setDescription('ประเภท Shard').setRequired(true)
@@ -809,7 +837,9 @@ async function handleSlash(interaction) {
   const cmd = interaction.commandName;
   const userId = interaction.user.id;
   const username = interaction.member?.displayName || interaction.user.username;
-  const color = getEmblemColor(userId);
+  // color ต้อง evaluate ตอนใช้จริงๆ ไม่ใช่ตอนต้น function
+  // เพื่อป้องกัน stale value ระหว่าง users
+  const getColor = () => getEmblemColor(userId);
 
   // /roll
   if (cmd === 'roll') {
@@ -824,7 +854,7 @@ async function handleSlash(interaction) {
   if (cmd === 'daily') {
     const p = getPlayer(userId);
     const today = getDayKey();
-    if (p.last_daily === today) return interaction.reply({ embeds: [new EmbedBuilder().setColor(color).setTitle('Daily').setDescription('รับแล้ววันนี้ครับ มาใหม่ตี 4!')], ephemeral: true });
+    if (p.last_daily === today) return interaction.reply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle('Daily').setDescription('รับแล้ววันนี้ครับ มาใหม่ตี 4!')], ephemeral: true });
     const yest = new Date(Date.now() + 7*60*60*1000);
     if (yest.getUTCHours() < 4) yest.setUTCDate(yest.getUTCDate() - 1);
     yest.setUTCDate(yest.getUTCDate() - 1);
@@ -850,7 +880,7 @@ async function handleSlash(interaction) {
     const bar = Array.from({length:7}, (_,i) => i < p.streak ? '⭐' : '☆').join(' ');
     const emblemName = p.equipped_emblem === 'default' ? 'Default' : EMBLEMS[p.equipped_emblem]?.name || 'Default';
     const bannerName = p.equipped_banner === 'default' ? 'Default' : BANNERS[p.equipped_banner]?.name || 'Default';
-    return interaction.editReply({ embeds: [new EmbedBuilder().setColor(color).setTitle(`Inventory — ${username}`)
+    return interaction.editReply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle(`Inventory — ${username}`)
       .addFields(
         { name: 'ยอดเงิน', value: `Gold: **${p.gold.toLocaleString()}**\nRC: **${p.rc.toLocaleString()}**\nชนะวันนี้: ${p.win_today.toLocaleString()}/${WIN_CAP.toLocaleString()}`, inline: true },
         { name: 'Items', value: `Re-roll: **x${p.inv_reroll}**\nEmblem Shard: **x${p.inv_emblem_shard}**\nBanner Shard: **x${p.inv_banner_shard}**`, inline: true },
@@ -870,20 +900,32 @@ async function handleSlash(interaction) {
     const rc = amount / EXCHANGE_RATE;
     updatePlayer(userId, { gold: p.gold - amount, rc: p.rc + rc });
     const fresh = getPlayer(userId);
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(color).setTitle('แลกเงิน').setDescription(`-${amount.toLocaleString()} Gold -> +${rc.toLocaleString()} RC\n\nGold เหลือ: **${fresh.gold.toLocaleString()}**\nRC ทั้งหมด: **${fresh.rc.toLocaleString()}**`)] });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle('แลกเงิน').setDescription(`-${amount.toLocaleString()} Gold -> +${rc.toLocaleString()} RC\n\nGold เหลือ: **${fresh.gold.toLocaleString()}**\nRC ทั้งหมด: **${fresh.rc.toLocaleString()}**`)] });
   }
 
   // /use
   if (cmd === 'use') {
     await interaction.deferReply();
     const p = getPlayer(userId);
-    const item = interaction.options.getString('item');
+    const item = interaction.options.getString('item').toLowerCase().replace(/ /g, '_');
     const amount = interaction.options.getInteger('amount') || 1;
+
+    // Validate item exists in inventory
+    const validItems = [];
+    if (p.inv_reroll > 0) validItems.push('reroll');
+    Object.keys(BOX_RATES).forEach(k => { if ((p[`box_${k}`] || 0) > 0) validItems.push(k); });
+
+    if (!validItems.includes(item)) {
+      const itemList = validItems.length > 0
+        ? validItems.map(i => `\`${i}\``).join(', ')
+        : 'ไม่มีไอเทมอยู่ในกระเป๋าครับ';
+      return interaction.editReply({ content: `ไม่มีไอเทมนี้ในกระเป๋าครับ\nไอเทมที่มี: ${itemList}` });
+    }
 
     if (item === 'reroll') {
       if (p.inv_reroll < 1) return interaction.editReply({ content: 'ไม่มี Re-roll ครับ' });
       updatePlayer(userId, { inv_reroll: p.inv_reroll - 1 });
-      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(color).setTitle('ใช้ Re-roll').setDescription(`ใช้ Re-roll แล้วครับ!\nเหลือ: **x${p.inv_reroll - 1}**`)] });
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle('ใช้ Re-roll').setDescription(`ใช้ Re-roll แล้วครับ!\nเหลือ: **x${p.inv_reroll - 1}**`)] });
     }
 
     // Box opening
@@ -956,7 +998,7 @@ async function handleSlash(interaction) {
         if (eclipseUnlocked) desc += `\n\n🌑 **Eclipse ปลดล็อคแล้ว!** Collection ครบ!`;
       }
 
-      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(color).setTitle(`🎁 ${BOX_NAMES[item]}`).setDescription(desc)] });
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle(`🎁 ${BOX_NAMES[item]}`).setDescription(desc)] });
     }
   }
 
@@ -977,7 +1019,7 @@ async function handleSlash(interaction) {
       if (!BANNERS[name]) return interaction.editReply({ content: 'ไม่พบ banner นี้ครับ' });
       if (!owned.includes(name)) return interaction.editReply({ content: 'คุณยังไม่มี banner นี้ครับ' });
       updatePlayer(userId, { equipped_banner: name });
-      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(color).setTitle('Equip Banner').setDescription(`เปลี่ยนเป็น **${BANNERS[name].name}** แล้วครับ!`)] });
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle('Equip Banner').setDescription(`เปลี่ยนเป็น **${BANNERS[name].name}** แล้วครับ!`)] });
     }
   }
 
@@ -993,7 +1035,7 @@ async function handleSlash(interaction) {
     updatePlayer(userId, { gold: p.gold - amount });
     updatePlayer(target.id, { gold: tp.gold + amount });
     const fresh = getPlayer(userId);
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(color).setTitle('โอน Gold').setDescription(`โอน **${amount.toLocaleString()} Gold** ให้ <@${target.id}> แล้วครับ\nGold เหลือ: **${fresh.gold.toLocaleString()}**`)] });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle('โอน Gold').setDescription(`โอน **${amount.toLocaleString()} Gold** ให้ <@${target.id}> แล้วครับ\nGold เหลือ: **${fresh.gold.toLocaleString()}**`)] });
   }
 
   // /coinflip
@@ -1002,7 +1044,7 @@ async function handleSlash(interaction) {
     const choice = interaction.options.getString('choice');
     const loss = applyLoss(userId, amount);
     if (!loss.ok) return interaction.reply({ content: loss.reason, ephemeral: true });
-    const win = randF() < 0.45;
+    const win = randF() < 0.42;
     const result = win ? choice : (choice === 'heads' ? 'tails' : 'heads');
     if (win) {
       const w = applyWin(userId, amount, 2);
@@ -1018,7 +1060,7 @@ async function handleSlash(interaction) {
     if (!loss.ok) return interaction.reply({ content: loss.reason, ephemeral: true });
     const contrib = Math.floor(amount * POOL_CONTRIB);
     setPool(getPool() + contrib);
-    const forceWin = randF() < 0.20;
+    const forceWin = randF() < 0.18;
     let reels = [spinSlot(), spinSlot(), spinSlot()];
     if (forceWin) { const s = spinSlot(); reels = [s, s, s]; }
     else { while (reels[0] === reels[1] && reels[1] === reels[2]) reels[2] = spinSlot(); }
@@ -1086,10 +1128,10 @@ async function handleSlash(interaction) {
 
   // /help
   if (cmd === 'help') {
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(color).setTitle(`${BOTNAME} — คำสั่งทั้งหมด`)
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle(`${BOTNAME} — คำสั่งทั้งหมด`)
       .addFields(
         { name: 'Roll', value: '/roll [expression] — ทอยลูกเต๋า\n!r [expression] — prefix', inline: false },
-        { name: 'เงิน & ไอเทม', value: '/daily — รับรางวัลประจำวัน\n/inventory — ดูกระเป๋า\n/convert amount — แลก 3 Gold = 1 RC\n/use item amount — ใช้ไอเทมหรือเปิดกล่อง (max 10)\n/equip type name — เปลี่ยน emblem/banner\n/transfer @user amount — โอน Gold', inline: false },
+        { name: 'เงิน & ไอเทม', value: '/daily — รับรางวัลประจำวัน\n/inventory — ดูกระเป๋า\n/convert amount — แลก 3 Gold = 1 RC\n/use item amount — ใช้ไอเทมหรือเปิดกล่อง (max 10)\n/equip type name — เปลี่ยน emblem/banner\n/transfer @user amount — โอน Gold\n/shop — ดูราคาทั้งหมด\n/buy_emblem / /buy_banner — ซื้อตรง\n/exchange — แลก Shard', inline: false },
         { name: 'เกมพนัน', value: '/coinflip amount choice\n/slots amount\n/blackjack amount\n/roulette amount bet', inline: false },
         { name: 'Gacha', value: 'เปิดกล่องด้วย /use item:box_name\nซื้อกล่องด้วย RC ผ่าน /use\nสะสม Shard แลกกล่องได้', inline: false },
         { name: 'Staff', value: '/give /gift /take /revoke /inspect', inline: false },
@@ -1176,44 +1218,54 @@ async function handleSlash(interaction) {
       )] });
   }
 
-  // /buy
-  if (cmd === 'buy') {
+  // /buy_emblem
+  if (cmd === 'buy_emblem') {
     await interaction.deferReply();
-    const type = interaction.options.getString('type');
-    const name = interaction.options.getString('name').toLowerCase().replace(/ /g, '_');
+    const name = interaction.options.getString('name');
     const p = getPlayer(userId);
     const PRICES = { C: 400, R: 650, SR: 1200, UR: 2500 };
+    const emb = EMBLEMS[name];
+    if (!emb) return interaction.editReply({ content: 'ไม่พบ emblem นี้ครับ' });
+    const price = PRICES[emb.rarity];
+    const owned = getOwnedEmblems(userId);
+    if (owned.includes(name)) return interaction.editReply({ content: `มี **${emb.name}** อยู่แล้วครับ` });
+    if (p.rc < price) return interaction.editReply({ content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${price.toLocaleString()})` });
+    updatePlayer(userId, { rc: p.rc - price });
+    addEmblem(userId, name);
+    const eclipseUnlocked = checkCollectionComplete(userId, 'divinitas');
+    if (eclipseUnlocked) addEmblem(userId, 'aurum_imperialis');
+    const freshP = getPlayer(userId);
+    return interaction.editReply({ embeds: [new EmbedBuilder().setColor(emb.color).setTitle('💎 ซื้อ Emblem สำเร็จ!')
+      .setDescription(`ได้รับ **${emb.name}** แล้วครับ!
+-${price.toLocaleString()} RC
+RC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '
 
-    if (type === 'emblem') {
-      if (!EMBLEMS[name]) return interaction.editReply({ content: 'ไม่พบ emblem นี้ครับ ลองตรวจสอบชื่อใน /shop' });
-      const emb = EMBLEMS[name];
-      if (emb.rarity === 'Eclipse') return interaction.editReply({ content: 'Eclipse ซื้อตรงไม่ได้ครับ ต้องสะสม collection ครบ 12 ชิ้น' });
-      const price = PRICES[emb.rarity];
-      const owned = getOwnedEmblems(userId);
-      if (owned.includes(name)) return interaction.editReply({ content: `มี **${emb.name}** อยู่แล้วครับ` });
-      if (p.rc < price) return interaction.editReply({ content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${price.toLocaleString()})` });
-      updatePlayer(userId, { rc: p.rc - price });
-      addEmblem(userId, name);
-      // Check eclipse
-      if (checkCollectionComplete(userId, 'divinitas')) addEmblem(userId, 'aurum_imperialis');
-      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(emb.color).setTitle('💎 ซื้อ Emblem สำเร็จ!')
-        .setDescription(`ได้รับ **${emb.name}** แล้วครับ!\n-${price.toLocaleString()} RC\nRC เหลือ: **${(p.rc - price).toLocaleString()}**`)] });
-    }
+🌑 **Eclipse ปลดล็อคแล้ว!**' : ''}`)] });
+  }
 
-    if (type === 'banner') {
-      if (!BANNERS[name]) return interaction.editReply({ content: 'ไม่พบ banner นี้ครับ ลองตรวจสอบชื่อใน /shop' });
-      const ban = BANNERS[name];
-      if (ban.rarity === 'Eclipse') return interaction.editReply({ content: 'Eclipse ซื้อตรงไม่ได้ครับ ต้องสะสม collection ครบ 12 ชิ้น' });
-      const price = PRICES[ban.rarity];
-      const owned = getOwnedBanners(userId);
-      if (owned.includes(name)) return interaction.editReply({ content: `มี **${ban.name}** อยู่แล้วครับ` });
-      if (p.rc < price) return interaction.editReply({ content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${price.toLocaleString()})` });
-      updatePlayer(userId, { rc: p.rc - price });
-      addBanner(userId, name);
-      if (checkCollectionComplete(userId, 'lofy')) addBanner(userId, 'newton_prime');
-      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(color).setTitle('🌸 ซื้อ Banner สำเร็จ!')
-        .setDescription(`ได้รับ **${ban.name}** แล้วครับ!\n-${price.toLocaleString()} RC\nRC เหลือ: **${(p.rc - price).toLocaleString()}**`)] });
-    }
+  // /buy_banner
+  if (cmd === 'buy_banner') {
+    await interaction.deferReply();
+    const name = interaction.options.getString('name');
+    const p = getPlayer(userId);
+    const PRICES = { C: 400, R: 650, SR: 1200, UR: 2500 };
+    const ban = BANNERS[name];
+    if (!ban) return interaction.editReply({ content: 'ไม่พบ banner นี้ครับ' });
+    const price = PRICES[ban.rarity];
+    const owned = getOwnedBanners(userId);
+    if (owned.includes(name)) return interaction.editReply({ content: `มี **${ban.name}** อยู่แล้วครับ` });
+    if (p.rc < price) return interaction.editReply({ content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${price.toLocaleString()})` });
+    updatePlayer(userId, { rc: p.rc - price });
+    addBanner(userId, name);
+    const eclipseUnlocked = checkCollectionComplete(userId, 'lofy');
+    if (eclipseUnlocked) addBanner(userId, 'newton_prime');
+    const freshP = getPlayer(userId);
+    return interaction.editReply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle('🌸 ซื้อ Banner สำเร็จ!')
+      .setDescription(`ได้รับ **${ban.name}** แล้วครับ!
+-${price.toLocaleString()} RC
+RC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '
+
+🌑 **Eclipse ปลดล็อคแล้ว!**' : ''}`)] });
   }
 
   // /exchange
@@ -1295,7 +1347,7 @@ async function handleButton(interaction) {
 
   if (id.startsWith('bj_stand_')) {
     bjGames.delete(userId);
-    while (handVal(game.dealer) < 17) game.dealer.push(game.deck.pop());
+    while (handVal(game.dealer) < 18) game.dealer.push(game.deck.pop());
     const pv = handVal(game.player), dv = handVal(game.dealer);
     const dStr = `Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}`;
     const pStr = `คุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}`;
