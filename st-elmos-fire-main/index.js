@@ -491,9 +491,14 @@ async function generateBannerCard(bannerImg, username, expr, grand, breakdown, e
 
   // Draw banner background
   try {
-    const img = await loadImage(bannerImg);
+    const response = await fetch(bannerImg);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    const imgBuffer = Buffer.from(arrayBuffer);
+    const img = await loadImage(imgBuffer);
     ctx.drawImage(img, 0, 0, W, H);
   } catch (e) {
+    console.error('Banner load error:', e.message);
     const grad = ctx.createLinearGradient(0, 0, W, H);
     grad.addColorStop(0, '#1a1a2e');
     grad.addColorStop(1, '#2d2d44');
@@ -801,7 +806,7 @@ const client = new Client({
 });
 
 client.once('clientReady', async () => {
-  console.log(`${BOTNAME} v4.0 online: ${client.user.tag}`);
+  console.log(`${BOTNAME} v5.0 online: ${client.user.tag}`);
   await deployCommands();
 });
 
