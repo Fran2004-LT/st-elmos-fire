@@ -1235,12 +1235,8 @@ async function handleSlash(interaction) {
     const eclipseUnlocked = checkCollectionComplete(userId, 'divinitas');
     if (eclipseUnlocked) addEmblem(userId, 'aurum_imperialis');
     const freshP = getPlayer(userId);
-    return interaction.editReply({ embeds: [new EmbedBuilder().setColor(emb.color).setTitle('💎 ซื้อ Emblem สำเร็จ!')
-      .setDescription(`ได้รับ **${emb.name}** แล้วครับ!
--${price.toLocaleString()} RC
-RC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '
-
-🌑 **Eclipse ปลดล็อคแล้ว!**' : ''}`)] });
+    const embDesc = `ได้รับ **${emb.name}** แล้วครับ!\n-${price.toLocaleString()} RC\nRC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '\n\n🌑 **Eclipse ปลดล็อคแล้ว!**' : ''}`;
+    return interaction.editReply({ embeds: [new EmbedBuilder().setColor(emb.color).setTitle('💎 ซื้อ Emblem สำเร็จ!').setDescription(embDesc)] });
   }
 
   // /buy_banner
@@ -1260,12 +1256,8 @@ RC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '
     const eclipseUnlocked = checkCollectionComplete(userId, 'lofy');
     if (eclipseUnlocked) addBanner(userId, 'newton_prime');
     const freshP = getPlayer(userId);
-    return interaction.editReply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle('🌸 ซื้อ Banner สำเร็จ!')
-      .setDescription(`ได้รับ **${ban.name}** แล้วครับ!
--${price.toLocaleString()} RC
-RC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '
-
-🌑 **Eclipse ปลดล็อคแล้ว!**' : ''}`)] });
+    const banDesc = `ได้รับ **${ban.name}** แล้วครับ!\n-${price.toLocaleString()} RC\nRC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '\n\n🌑 **Eclipse ปลดล็อคแล้ว!**' : ''}`;
+    return interaction.editReply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle('🌸 ซื้อ Banner สำเร็จ!').setDescription(banDesc)] });
   }
 
   // /exchange
