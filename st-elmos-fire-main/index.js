@@ -187,6 +187,15 @@ db.exec(`
   INSERT OR IGNORE INTO jackpot (id, pool) VALUES (1, 0);
 `);
 
+// Migration: เพิ่ม column ใหม่ถ้ายังไม่มี
+const migrations = [
+  "ALTER TABLE players ADD COLUMN free_emblem INTEGER DEFAULT 0",
+  "ALTER TABLE players ADD COLUMN free_banner INTEGER DEFAULT 0",
+];
+for (const sql of migrations) {
+  try { db.exec(sql); } catch (e) { /* column exists already */ }
+}
+
 function getDayKey() {
   const ict = new Date(Date.now() + 7 * 60 * 60 * 1000);
   if (ict.getUTCHours() < 4) ict.setUTCDate(ict.getUTCDate() - 1);
