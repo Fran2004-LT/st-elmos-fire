@@ -10,8 +10,25 @@ import {
 import { randomInt } from 'crypto';
 import Database from 'better-sqlite3';
 import 'dotenv/config';
-import { createCanvas, loadImage } from 'canvas';
+import { createCanvas, loadImage, registerFont } from 'canvas';
 import fetch from 'node-fetch';
+
+// ══════════════════════════════════════════════
+//  FONT REGISTRATION
+// ══════════════════════════════════════════════
+import { existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const FONT_PATH = join(__dirname, 'assets', 'fonts', 'NotoSans-Regular.ttf');
+if (existsSync(FONT_PATH)) {
+  registerFont(FONT_PATH, { family: 'NotoSans' });
+  console.log('Font loaded: NotoSans');
+} else {
+  console.log('Font not found, using fallback');
+}
+const CANVAS_FONT = existsSync(FONT_PATH) ? 'NotoSans' : 'sans-serif';
 
 // ══════════════════════════════════════════════
 //  CONFIG
@@ -500,12 +517,12 @@ async function generateBannerCard(bannerImg, username, expr, grand, breakdown, e
 
   // Username
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = '13px sans-serif';
+  ctx.font = `13px ${CANVAS_FONT}`;
   ctx.fillText(`@${username}`, 18, 26);
 
   // Expression
   ctx.fillStyle = 'rgba(187,136,255,0.55)';
-  ctx.font = '10px monospace';
+  ctx.font = `10px ${CANVAS_FONT}`;
   ctx.fillText(expr, 18, 44);
 
   // Divider
@@ -514,12 +531,12 @@ async function generateBannerCard(bannerImg, username, expr, grand, breakdown, e
 
   // Grand total
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 52px sans-serif';
+  ctx.font = `bold 52px ${CANVAS_FONT}`;
   ctx.fillText(`${grand}`, 18, 108);
 
   // Breakdown
   ctx.fillStyle = 'rgba(187,136,255,0.6)';
-  ctx.font = '11px monospace';
+  ctx.font = `11px ${CANVAS_FONT}`;
   const breakStr = breakdown.slice(0, 45);
   ctx.fillText(breakStr, 18, 130);
 
@@ -678,6 +695,30 @@ const commands = [
     .addStringOption(o => o.setName('bet').setDescription('red/black/odd/even/1-18/19-36/0-36').setRequired(true)),
 
   new SlashCommandBuilder().setName('help').setDescription('ดูคำสั่งทั้งหมด'),
+
+  new SlashCommandBuilder().setName('shop').setDescription('ดูราคา emblem banner และกล่องทั้งหมด')
+    .addStringOption(o => o.setName('category').setDescription('หมวดหมู่').setRequired(false)
+      .addChoices(
+        { name: 'Emblem (Divinitas Gemma)', value: 'emblem' },
+        { name: 'Banner (Lofy Harmonic)', value: 'banner' },
+        { name: 'กล่องสุ่ม (Gacha Boxes)', value: 'boxes' },
+      )),
+
+  new SlashCommandBuilder().setName('buy').setDescription('ซื้อ emblem หรือ banner ด้วย RC')
+    .addStringOption(o => o.setName('type').setDescription('emblem หรือ banner').setRequired(true)
+      .addChoices({ name: 'Emblem', value: 'emblem' }, { name: 'Banner', value: 'banner' }))
+    .addStringOption(o => o.setName('name').setDescription('ชื่อ emblem/banner').setRequired(true)),
+
+  new SlashCommandBuilder().setName('exchange').setDescription('แลก Shard เป็นกล่อง')
+    .addStringOption(o => o.setName('type').setDescription('ประเภท Shard').setRequired(true)
+      .addChoices({ name: 'Emblem Shard', value: 'emblem' }, { name: 'Banner Shard', value: 'banner' }))
+    .addStringOption(o => o.setName('box').setDescription('กล่องที่ต้องการ').setRequired(true)
+      .addChoices(
+        { name: 'Normal Box (5 Shards)', value: 'normal' },
+        { name: 'Mid Box (10 Shards)', value: 'mid' },
+        { name: 'UMAZING Box (20 Shards)', value: 'umazing' },
+        { name: 'Select Box — เลือกได้เลย (50 Shards)', value: 'select' },
+      )),
 
   // Staff
   new SlashCommandBuilder().setName('give').setDescription('[Staff] แจกเงิน')
@@ -890,9 +931,12 @@ async function handleSlash(interaction) {
       if (totalShard > 0) updates[shardKey] = freshP[shardKey] + totalShard;
       updatePlayer(userId, updates);
 
-      // Check eclipse unlock
+      // Check eclipse unlock (check AFTER all items saved)
       const collectionType = isEmblem ? 'divinitas' : 'lofy';
-      const eclipseUnlocked = checkCollectionComplete(userId, collectionType);
+      const eclipseId = isEmblem ? 'aurum_imperialis' : 'newton_prime';
+      const ownedAfter = isEmblem ? getOwnedEmblems(userId) : getOwnedBanners(userId);
+      const alreadyHasEclipse = ownedAfter.includes(eclipseId);
+      const eclipseUnlocked = !alreadyHasEclipse && checkCollectionComplete(userId, collectionType);
       if (eclipseUnlocked) {
         if (isEmblem) addEmblem(userId, 'aurum_imperialis');
         else addBanner(userId, 'newton_prime');
@@ -1106,6 +1150,104 @@ async function handleSlash(interaction) {
     if (item === 'banner_shard') { const d = Math.min(amount, tp.inv_banner_shard); updatePlayer(target.id, { inv_banner_shard: tp.inv_banner_shard - d }); return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('Staff — ลบไอเทม').setDescription(`ลบ **Banner Shard x${d}** จาก <@${target.id}>`)] }); }
   }
 
+
+  // /shop
+  if (cmd === 'shop') {
+    const category = interaction.options.getString('category') || 'boxes';
+    if (category === 'emblem') {
+      const rarityLabel = { C:'⬜ Common', R:'💙 Rare', SR:'💜 Super Rare', UR:'✨ Ultra Rare', Eclipse:'🌑 Eclipse' };
+      const priceLabel = { C:'400 RC', R:'650 RC', SR:'1,200 RC', UR:'2,500 RC', Eclipse:'ปลดล็อคจาก collection' };
+      const rows = Object.entries(EMBLEMS).map(([k,v]) => `${rarityLabel[v.rarity]} **${v.name}** — ${priceLabel[v.rarity]}`).join('\n');
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle('💎 Divinitas Gemma — ซื้อตรง').setDescription(rows + '\n\nใช้ `/buy type:emblem name:ชื่อ` ครับ')] });
+    }
+    if (category === 'banner') {
+      const rarityLabel = { C:'⬜ Common', R:'💙 Rare', SR:'💜 Super Rare', UR:'✨ Ultra Rare', Eclipse:'🌑 Eclipse' };
+      const priceLabel = { C:'400 RC', R:'650 RC', SR:'1,200 RC', UR:'2,500 RC', Eclipse:'ปลดล็อคจาก collection' };
+      const rows = Object.entries(BANNERS).map(([k,v]) => `${rarityLabel[v.rarity]} **${v.name}** — ${priceLabel[v.rarity]}`).join('\n');
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xE8B4B8).setTitle('🌸 Lofy Harmonic — ซื้อตรง').setDescription(rows + '\n\nใช้ `/buy type:banner name:ชื่อ` ครับ')] });
+    }
+    // boxes
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff).setTitle('🎁 กล่องสุ่ม Gacha')
+      .addFields(
+        { name: 'Divinitas Gemma (Emblem)', value: 'Normal — **150 RC** (C:45% R:25% SR:10% UR:2% Salt:18%)\nMid — **300 RC** (C:25% R:30% SR:22% UR:8% Salt:15%)\nUMAZING — **1,500 RC** (R:20% SR:55% UR:25%)', inline: false },
+        { name: 'Lofy Harmonic (Banner)', value: 'Normal — **150 RC** (C:45% R:25% SR:10% UR:2% Salt:18%)\nMid — **300 RC** (C:25% R:30% SR:22% UR:8% Salt:15%)\nUMAZING — **1,500 RC** (R:20% SR:55% UR:25%)', inline: false },
+        { name: 'x10 Multi-pull', value: 'ลด 5% + Rate up ทุก rarity +2%\nการันตี R+ (Normal) / SR+ (Mid) / UR (UMAZING) ใน pull สุดท้าย', inline: false },
+        { name: 'Pity System', value: 'Soft Pity pull ที่ 80 (50% force UR)\nHard Pity pull ที่ 100 (การันตี UR)', inline: false },
+      )] });
+  }
+
+  // /buy
+  if (cmd === 'buy') {
+    await interaction.deferReply();
+    const type = interaction.options.getString('type');
+    const name = interaction.options.getString('name').toLowerCase().replace(/ /g, '_');
+    const p = getPlayer(userId);
+    const PRICES = { C: 400, R: 650, SR: 1200, UR: 2500 };
+
+    if (type === 'emblem') {
+      if (!EMBLEMS[name]) return interaction.editReply({ content: 'ไม่พบ emblem นี้ครับ ลองตรวจสอบชื่อใน /shop' });
+      const emb = EMBLEMS[name];
+      if (emb.rarity === 'Eclipse') return interaction.editReply({ content: 'Eclipse ซื้อตรงไม่ได้ครับ ต้องสะสม collection ครบ 12 ชิ้น' });
+      const price = PRICES[emb.rarity];
+      const owned = getOwnedEmblems(userId);
+      if (owned.includes(name)) return interaction.editReply({ content: `มี **${emb.name}** อยู่แล้วครับ` });
+      if (p.rc < price) return interaction.editReply({ content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${price.toLocaleString()})` });
+      updatePlayer(userId, { rc: p.rc - price });
+      addEmblem(userId, name);
+      // Check eclipse
+      if (checkCollectionComplete(userId, 'divinitas')) addEmblem(userId, 'aurum_imperialis');
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(emb.color).setTitle('💎 ซื้อ Emblem สำเร็จ!')
+        .setDescription(`ได้รับ **${emb.name}** แล้วครับ!\n-${price.toLocaleString()} RC\nRC เหลือ: **${(p.rc - price).toLocaleString()}**`)] });
+    }
+
+    if (type === 'banner') {
+      if (!BANNERS[name]) return interaction.editReply({ content: 'ไม่พบ banner นี้ครับ ลองตรวจสอบชื่อใน /shop' });
+      const ban = BANNERS[name];
+      if (ban.rarity === 'Eclipse') return interaction.editReply({ content: 'Eclipse ซื้อตรงไม่ได้ครับ ต้องสะสม collection ครบ 12 ชิ้น' });
+      const price = PRICES[ban.rarity];
+      const owned = getOwnedBanners(userId);
+      if (owned.includes(name)) return interaction.editReply({ content: `มี **${ban.name}** อยู่แล้วครับ` });
+      if (p.rc < price) return interaction.editReply({ content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${price.toLocaleString()})` });
+      updatePlayer(userId, { rc: p.rc - price });
+      addBanner(userId, name);
+      if (checkCollectionComplete(userId, 'lofy')) addBanner(userId, 'newton_prime');
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(color).setTitle('🌸 ซื้อ Banner สำเร็จ!')
+        .setDescription(`ได้รับ **${ban.name}** แล้วครับ!\n-${price.toLocaleString()} RC\nRC เหลือ: **${(p.rc - price).toLocaleString()}**`)] });
+    }
+  }
+
+  // /exchange
+  if (cmd === 'exchange') {
+    const type = interaction.options.getString('type');
+    const box = interaction.options.getString('box');
+    const p = getPlayer(userId);
+    const isEmblem = type === 'emblem';
+    const shardKey = isEmblem ? 'inv_emblem_shard' : 'inv_banner_shard';
+    const shardName = isEmblem ? 'Emblem Shard' : 'Banner Shard';
+    const COSTS = { normal: 5, mid: 10, umazing: 20, select: 50 };
+    const cost = COSTS[box];
+    const currentShards = p[shardKey];
+
+    if (box === 'select') {
+      if (currentShards < 50) return interaction.reply({ content: `${shardName} ไม่พอครับ (มี ${currentShards}/50)`, ephemeral: true });
+      // Select box - show all available items
+      const owned = isEmblem ? getOwnedEmblems(userId) : getOwnedBanners(userId);
+      const pool = isEmblem ? EMBLEMS : BANNERS;
+      const notOwned = Object.entries(pool).filter(([k,v]) => !owned.includes(k) && v.rarity !== 'Eclipse').map(([k,v]) => `**${v.name}** (${v.rarity})`).join('\n');
+      if (!notOwned) return interaction.reply({ content: 'มีครบทุกชิ้นแล้วครับ!', ephemeral: true });
+      updatePlayer(userId, { [shardKey]: currentShards - 50 });
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle('👑 Select Box')
+        .setDescription(`หัก **50 ${shardName}** แล้วครับ\nใช้ \`/buy\` เพื่อเลือกรับชิ้นที่ต้องการได้เลย:\n\n${notOwned}`)] });
+    }
+
+    if (currentShards < cost) return interaction.reply({ content: `${shardName} ไม่พอครับ (มี ${currentShards}/${cost})`, ephemeral: true });
+    const prefix = isEmblem ? 'divinitas' : 'lofy';
+    const boxKey = `box_${prefix}_${box}`;
+    updatePlayer(userId, { [shardKey]: currentShards - cost, [boxKey]: (p[boxKey] || 0) + 1 });
+    const boxNames = { normal: 'Normal Box', mid: 'Mid Box', umazing: 'UMAZING Box' };
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xbb88ff).setTitle('🔄 แลก Shard')
+      .setDescription(`แลก **${cost} ${shardName}** → **${isEmblem ? 'Divinitas' : 'Lofy'} ${boxNames[box]}** x1 แล้วครับ\nShard เหลือ: **${currentShards - cost}**`)] });
+  }
   // /inspect
   if (cmd === 'inspect') {
     if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
