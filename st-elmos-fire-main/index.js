@@ -1234,13 +1234,19 @@ async function handleSlash(interaction) {
     const price = PRICES[emb.rarity];
     const owned = getOwnedEmblems(userId);
     if (owned.includes(name)) return interaction.editReply({ content: `มี **${emb.name}** อยู่แล้วครับ` });
-    if (p.rc < price) return interaction.editReply({ content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${price.toLocaleString()})` });
-    updatePlayer(userId, { rc: p.rc - price });
+    const isFree = (p.free_emblem || 0) > 0;
+    if (!isFree && p.rc < price) return interaction.editReply({ content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${price.toLocaleString()})` });
+    if (isFree) {
+      updatePlayer(userId, { free_emblem: p.free_emblem - 1 });
+    } else {
+      updatePlayer(userId, { rc: p.rc - price });
+    }
     addEmblem(userId, name);
     const eclipseUnlocked = checkCollectionComplete(userId, 'divinitas');
     if (eclipseUnlocked) addEmblem(userId, 'aurum_imperialis');
     const freshP = getPlayer(userId);
-    const embDesc = `ได้รับ **${emb.name}** แล้วครับ!\n-${price.toLocaleString()} RC\nRC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '\n\n🌑 **Eclipse ปลดล็อคแล้ว!**' : ''}`;
+    const freeNote = isFree ? '(ใช้ Select Box — ฟรี!)' : `-${price.toLocaleString()} RC`;
+    const embDesc = `ได้รับ **${emb.name}** แล้วครับ!\n${freeNote}\nRC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '\n\n🌑 **Eclipse ปลดล็อคแล้ว!**' : ''}`;
     return interaction.editReply({ embeds: [new EmbedBuilder().setColor(emb.color).setTitle('💎 ซื้อ Emblem สำเร็จ!').setDescription(embDesc)] });
   }
 
@@ -1255,13 +1261,19 @@ async function handleSlash(interaction) {
     const price = PRICES[ban.rarity];
     const owned = getOwnedBanners(userId);
     if (owned.includes(name)) return interaction.editReply({ content: `มี **${ban.name}** อยู่แล้วครับ` });
-    if (p.rc < price) return interaction.editReply({ content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${price.toLocaleString()})` });
-    updatePlayer(userId, { rc: p.rc - price });
+    const isFree = (p.free_banner || 0) > 0;
+    if (!isFree && p.rc < price) return interaction.editReply({ content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${price.toLocaleString()})` });
+    if (isFree) {
+      updatePlayer(userId, { free_banner: p.free_banner - 1 });
+    } else {
+      updatePlayer(userId, { rc: p.rc - price });
+    }
     addBanner(userId, name);
     const eclipseUnlocked = checkCollectionComplete(userId, 'lofy');
     if (eclipseUnlocked) addBanner(userId, 'newton_prime');
     const freshP = getPlayer(userId);
-    const banDesc = `ได้รับ **${ban.name}** แล้วครับ!\n-${price.toLocaleString()} RC\nRC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '\n\n🌑 **Eclipse ปลดล็อคแล้ว!**' : ''}`;
+    const freeNote = isFree ? '(ใช้ Select Box — ฟรี!)' : `-${price.toLocaleString()} RC`;
+    const banDesc = `ได้รับ **${ban.name}** แล้วครับ!\n${freeNote}\nRC เหลือ: **${freshP.rc.toLocaleString()}**${eclipseUnlocked ? '\n\n🌑 **Eclipse ปลดล็อคแล้ว!**' : ''}`;
     return interaction.editReply({ embeds: [new EmbedBuilder().setColor(getColor()).setTitle('🌸 ซื้อ Banner สำเร็จ!').setDescription(banDesc)] });
   }
 
@@ -1279,14 +1291,20 @@ async function handleSlash(interaction) {
 
     if (box === 'select') {
       if (currentShards < 50) return interaction.reply({ content: `${shardName} ไม่พอครับ (มี ${currentShards}/50)`, ephemeral: true });
-      // Select box - show all available items
       const owned = isEmblem ? getOwnedEmblems(userId) : getOwnedBanners(userId);
       const pool = isEmblem ? EMBLEMS : BANNERS;
-      const notOwned = Object.entries(pool).filter(([k,v]) => !owned.includes(k) && v.rarity !== 'Eclipse').map(([k,v]) => `**${v.name}** (${v.rarity})`).join('\n');
-      if (!notOwned) return interaction.reply({ content: 'มีครบทุกชิ้นแล้วครับ!', ephemeral: true });
-      updatePlayer(userId, { [shardKey]: currentShards - 50 });
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle('👑 Select Box')
-        .setDescription(`หัก **50 ${shardName}** แล้วครับ\nใช้ \`/buy\` เพื่อเลือกรับชิ้นที่ต้องการได้เลย:\n\n${notOwned}`)] });
+      const available = Object.entries(pool).filter(([k,v]) => !owned.includes(k) && v.rarity !== 'Eclipse');
+      if (!available.length) return interaction.reply({ content: 'มีครบทุกชิ้นแล้วครับ!', ephemeral: true });
+      // Build choices for dropdown
+      const cmdName = isEmblem ? 'buy_emblem' : 'buy_banner';
+      const listStr = available.map(([k,v]) => `\`${k}\` — **${v.name}** (${v.rarity})`).join('\n');
+      // Don't deduct yet - let player choose first via select_pending system
+      // Store pending select in DB as temp field - simpler: just show list and use /buy_emblem or /buy_banner with discount
+      // Mark player as having a free select pending
+      const freeKey = isEmblem ? 'free_emblem' : 'free_banner';
+      updatePlayer(userId, { [shardKey]: currentShards - 50, [freeKey]: (p[freeKey] || 0) + 1 });
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle('👑 Select Box — เลือกได้เลย!')
+        .setDescription(`หัก **50 ${shardName}** แล้วครับ\n\nใช้ \`/${cmdName}\` เพื่อรับชิ้นที่ต้องการ **ฟรี** ได้เลย\n(ระบบจะไม่หัก RC เพราะใช้ Select Box)\n\nที่ยังไม่มี:\n${listStr}`)] });
     }
 
     if (currentShards < cost) return interaction.reply({ content: `${shardName} ไม่พอครับ (มี ${currentShards}/${cost})`, ephemeral: true });
