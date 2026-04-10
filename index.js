@@ -10,6 +10,8 @@ import {
 import { randomInt } from 'crypto';
 import Database from 'better-sqlite3';
 import 'dotenv/config';
+import { createCanvas, loadImage } from 'canvas';
+import fetch from 'node-fetch';
 
 // ══════════════════════════════════════════════
 //  CONFIG
@@ -433,44 +435,125 @@ function getEmblemColor(userId) {
   return EMBLEMS[emblem]?.color || 0x111111;
 }
 
-function buildRollEmbed(parsed, tokens, username, userId) {
+function buildDiceText(parsed, tokens) {
   const results = tokens.map(t => rollSegment(t));
   const grand = results.reduce((a, r) => a + r.total, 0);
   const isMulti = results.length > 1;
   const lines = [];
-
-  // Get banner image if equipped
-  const p = getPlayer(userId);
-  const bannerImg = p.equipped_banner !== 'default' && BANNERS[p.equipped_banner]?.img
-    ? BANNERS[p.equipped_banner].img
-    : null;
-
-  if (parsed.mode === 'adv') lines.push('`ADVANTAGE`');
-  if (parsed.mode === 'dis') lines.push('`DISADVANTAGE`');
+  if (parsed.mode === 'adv') lines.push('ADVANTAGE');
+  if (parsed.mode === 'dis') lines.push('DISADVANTAGE');
   for (const r of results) {
-    if (r.type === 'flat') { lines.push(`${r.sign < 0 ? '-' : '+'} **${r.value}** (modifier)`); continue; }
+    if (r.type === 'flat') { lines.push(`${r.sign < 0 ? '-' : '+'} ${r.value} (modifier)`); continue; }
     if (r.type === 'multiply') {
       for (const sr of r.subResults) {
         if (sr.type === 'dice') {
           let ex = `${sr.num}d${sr.sides}`;
           if (sr.mode === 'kh') ex += ` kh${sr.keep}`;
           if (sr.mode === 'kl') ex += ` kl${sr.keep}`;
-          lines.push(`\`${ex}\` -> ${formatDice(sr)}`);
+          const rolled = sr.rolls.map((v,i) => sr.kept.has(i) ? v : `[${v}]`).join(' ');
+          lines.push(`${ex}: ${rolled}`);
         }
       }
-      lines.push(`x ${r.mult} = **${r.sign < 0 ? '-' : ''}${Math.abs(r.total)}**`); continue;
+      lines.push(`x${r.mult} = ${r.sign < 0 ? '-' : ''}${Math.abs(r.total)}`); continue;
     }
     let ex = `${r.num}d${r.sides}`;
     if (r.mode === 'kh') ex += ` kh${r.keep}`;
     if (r.mode === 'kl') ex += ` kl${r.keep}`;
     const tags = parsed.tags.length ? ` [${parsed.tags.join(', ')}]` : '';
-    const sub = isMulti ? ` = **${r.sign < 0 ? '-' : ''}${Math.abs(r.sub)}**` : '';
-    lines.push(`\`${ex}${tags}\` -> ${formatDice(r)}${sub}`);
+    const sub = isMulti ? ` = ${r.sign < 0 ? '-' : ''}${Math.abs(r.sub)}` : '';
+    const rolled = r.rolls.map((v,i) => r.kept.has(i) ? (v === r.sides ? `*${v}*` : `${v}`) : `[${v}]`).join(' ');
+    lines.push(`${ex}${tags}: ${rolled}${sub}`);
   }
-  lines.push(`\n@${username}\u2003**${grand}**`);
-  const embed = new EmbedBuilder().setColor(getEmblemColor(userId)).setDescription(lines.join('\n'));
-  if (bannerImg) embed.setImage(bannerImg);
-  return embed;
+  return { lines, grand };
+}
+
+async function generateBannerCard(bannerImg, username, expr, grand, breakdown, emblemColor) {
+  const W = 520, H = 160;
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+
+  // Draw banner background
+  try {
+    const img = await loadImage(bannerImg);
+    ctx.drawImage(img, 0, 0, W, H);
+  } catch (e) {
+    // fallback gradient
+    const grad = ctx.createLinearGradient(0, 0, W, H);
+    grad.addColorStop(0, '#1a1a2e');
+    grad.addColorStop(1, '#2d2d44');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Dark overlay left side for readability
+  const overlay = ctx.createLinearGradient(0, 0, W * 0.75, 0);
+  overlay.addColorStop(0, 'rgba(8,6,18,0.88)');
+  overlay.addColorStop(0.5, 'rgba(8,6,18,0.55)');
+  overlay.addColorStop(1, 'rgba(8,6,18,0)');
+  ctx.fillStyle = overlay;
+  ctx.fillRect(0, 0, W, H);
+
+  // Emblem color bar left
+  const hexColor = '#' + emblemColor.toString(16).padStart(6, '0');
+  ctx.fillStyle = hexColor;
+  ctx.fillRect(0, 0, 4, H);
+
+  // Username
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = '13px sans-serif';
+  ctx.fillText(`@${username}`, 18, 26);
+
+  // Expression
+  ctx.fillStyle = 'rgba(187,136,255,0.55)';
+  ctx.font = '10px monospace';
+  ctx.fillText(expr, 18, 44);
+
+  // Divider
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.fillRect(18, 52, 48, 1);
+
+  // Grand total
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 52px sans-serif';
+  ctx.fillText(`${grand}`, 18, 108);
+
+  // Breakdown
+  ctx.fillStyle = 'rgba(187,136,255,0.6)';
+  ctx.font = '11px monospace';
+  const breakStr = breakdown.slice(0, 45);
+  ctx.fillText(breakStr, 18, 130);
+
+  return canvas.toBuffer('image/png');
+}
+
+async function buildRollEmbed(parsed, tokens, username, userId) {
+  const { lines, grand } = buildDiceText(parsed, tokens);
+  const p = getPlayer(userId);
+  const emblemColor = getEmblemColor(userId);
+  const hasBanner = p.equipped_banner !== 'default' && BANNERS[p.equipped_banner]?.img;
+
+  if (hasBanner) {
+    try {
+      const bannerData = BANNERS[p.equipped_banner];
+      const expr = parsed.rollName || `${tokens.map(t => t.type === 'dice' ? `${t.num}d${t.sides}` : t.value).join('+')}`;
+      const breakdown = lines.join(' · ');
+      const buffer = await generateBannerCard(bannerData.img, username, expr, grand, breakdown, emblemColor);
+      const attachment = { attachment: buffer, name: 'roll.png' };
+      const embed = new EmbedBuilder().setColor(emblemColor).setImage('attachment://roll.png');
+      return { embeds: [embed], files: [attachment] };
+    } catch (e) {
+      console.error('Canvas error:', e);
+    }
+  }
+
+  // Fallback: text embed
+  const textLines = [];
+  if (parsed.mode === 'adv') textLines.push('`ADVANTAGE`');
+  if (parsed.mode === 'dis') textLines.push('`DISADVANTAGE`');
+  textLines.push(...lines);
+  textLines.push(`\n@${username}\u2003**${grand}**`);
+  const embed = new EmbedBuilder().setColor(emblemColor).setDescription(textLines.join('\n'));
+  return { embeds: [embed] };
 }
 
 // ══════════════════════════════════════════════
@@ -660,8 +743,10 @@ client.on('messageCreate', async msg => {
   const parsed = parseRoll(raw);
   if (parsed.err) return msg.reply(`Error: ${parsed.err}`);
   const username = msg.member?.displayName || msg.author.username;
-  try { await msg.reply({ embeds: [buildRollEmbed(parsed, parsed.tokens, username, msg.author.id)] }); }
-  catch (e) { console.error(e); }
+  try {
+    const result = await buildRollEmbed(parsed, parsed.tokens, username, msg.author.id);
+    await msg.reply(result);
+  } catch (e) { console.error(e); }
 });
 
 client.on('interactionCreate', async interaction => {
@@ -690,7 +775,8 @@ async function handleSlash(interaction) {
     const raw = interaction.options.getString('expression') || '1d20';
     const parsed = parseRoll(raw);
     if (parsed.err) return interaction.reply({ content: `Error: ${parsed.err}`, ephemeral: true });
-    return interaction.reply({ embeds: [buildRollEmbed(parsed, parsed.tokens, username, userId)] });
+    const rollResult = await buildRollEmbed(parsed, parsed.tokens, username, userId);
+    return interaction.reply(rollResult);
   }
 
   // /daily
