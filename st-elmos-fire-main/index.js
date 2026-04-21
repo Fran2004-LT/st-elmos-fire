@@ -27,14 +27,21 @@ if (existsSync(FONT_PATH)) {
 } else {
   console.log('Font not found, using fallback');
 }
-const CANVAS_FONT = existsSync(FONT_PATH) ? 'NotoSans' : 'sans-serif';
+// ลอง load NotoSansThai ด้วย
+const FONT_PATH_THAI = join(__dirname, 'assets', 'fonts', 'NotoSansThai-Regular.ttf');
+const FONT_PATH_THAI2 = join(__dirname, 'assets', 'fonts', 'NotoSans-Regular.ttf');
+if (existsSync(FONT_PATH_THAI)) {
+  registerFont(FONT_PATH_THAI, { family: 'NotoSansThai' });
+  console.log('Font loaded: NotoSansThai');
+}
+const CANVAS_FONT = existsSync(FONT_PATH_THAI) ? 'NotoSansThai' : (existsSync(FONT_PATH) ? 'NotoSans' : 'sans-serif');
 
 // ══════════════════════════════════════════════
 //  CONFIG
 // ══════════════════════════════════════════════
 const PREFIX        = '!r';
 const TAX           = 0.03;
-const WIN_CAP       = 10000;
+const WIN_CAP       = 30000;
 const POOL_CAP      = 30000;
 const JACKPOT_MULT  = 10;
 const POOL_CONTRIB  = 0.05;
@@ -467,7 +474,7 @@ function drawBackground(ctx, W, H, bgType, emblemColor) {
 //  ROLL CARD GENERATOR
 // ══════════════════════════════════════════════
 async function generateRollCard(username, expr, grand, breakdown, bundleKey) {
-  const W = 460, H = 110;
+  const W = 520, H = 130;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
 
@@ -496,8 +503,16 @@ async function generateRollCard(username, expr, grand, breakdown, bundleKey) {
   ctx.fillRect(0, 0, W, 3);
 
   // Emblem bar ซ้าย
-  ctx.fillStyle = emblemColor;
-  ctx.fillRect(0, 0, 5, H);
+  if (bgType === 'gallop_mejiro') {
+    // La Noblesse: emblem bar เขียวเพื่อ contrast บนพื้นขาว
+    ctx.fillStyle = '#1a6e2e';
+    ctx.fillRect(0, 0, 5, H);
+    ctx.fillStyle = '#F5F0E8';
+    ctx.fillRect(2, 0, 3, H);
+  } else {
+    ctx.fillStyle = emblemColor;
+    ctx.fillRect(0, 0, 5, H);
+  }
   // glow on emblem bar
   const barGlow = ctx.createLinearGradient(0, 0, 12, 0);
   barGlow.addColorStop(0, `rgba(${ec.r},${ec.g},${ec.b},0.2)`);
@@ -515,7 +530,7 @@ async function generateRollCard(username, expr, grand, breakdown, bundleKey) {
   ctx.arc(30, H/2, 16, 0, Math.PI*2);
   ctx.fill();
   ctx.fillStyle = isLight ? '#1a1200' : '#fff';
-  ctx.font = `bold 13px ${CANVAS_FONT}`;
+  ctx.font = `bold 14px ${CANVAS_FONT}`;
   ctx.textAlign = 'center';
   ctx.fillText(username.charAt(0).toUpperCase(), 30, H/2 + 5);
   ctx.textAlign = 'left';
@@ -531,26 +546,41 @@ async function generateRollCard(username, expr, grand, breakdown, bundleKey) {
   ctx.fillText(bundleName, 54, H/2 + 2);
 
   // Divider
-  ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.25)`;
-  ctx.fillRect(W*0.38, H*0.2, 1, H*0.6);
+  ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.3)`;
+  ctx.fillRect(W*0.36, 12, 1, H - 24);
 
-  // Expression + breakdown
+  // Expression
   ctx.fillStyle = dimColor;
-  ctx.font = `bold 10px ${CANVAS_FONT}`;
-  ctx.fillText(expr, W*0.41, H/2 - 10);
+  ctx.font = `bold 11px ${CANVAS_FONT}`;
+  ctx.fillText(expr, W*0.38, 28);
+  // Breakdown ทุกลูก
   ctx.fillStyle = dimColor2;
-  ctx.font = `10px ${CANVAS_FONT}`;
-  ctx.fillText(breakdown.slice(0, 30), W*0.41, H/2 + 6);
+  ctx.font = `11px ${CANVAS_FONT}`;
+  const maxBW = W * 0.58;
+  const bLines = [];
+  let curLine = '';
+  for (const part of breakdown.split(' | ')) {
+    const test = curLine ? curLine + '  ' + part : part;
+    if (ctx.measureText(test).width > maxBW && curLine) {
+      bLines.push(curLine); curLine = part;
+    } else { curLine = test; }
+  }
+  if (curLine) bLines.push(curLine);
+  bLines.slice(0, 3).forEach((l, i) => ctx.fillText(l, W*0.38, 50 + i * 18));
 
-  // Grand total
+  // Grand total — Deep Impact ไล่ เหลือง→ฟ้า
   ctx.textAlign = 'right';
-  ctx.font = `bold 52px ${CANVAS_FONT}`;
-  // gradient text for total
-  const totalGrad = ctx.createLinearGradient(W-10, 0, W-10, H);
-  totalGrad.addColorStop(0, emblemColor);
-  totalGrad.addColorStop(1, isLight ? '#888' : '#aaaaaa');
+  ctx.font = `bold 60px ${CANVAS_FONT}`;
+  const totalGrad = ctx.createLinearGradient(0, 10, 0, H - 10);
+  if (bgType === 'gallop_deep') {
+    totalGrad.addColorStop(0, '#FFD700');
+    totalGrad.addColorStop(1, '#1a3ab8');
+  } else {
+    totalGrad.addColorStop(0, emblemColor);
+    totalGrad.addColorStop(1, isLight ? '#666' : '#aaaaaa');
+  }
   ctx.fillStyle = totalGrad;
-  ctx.fillText(`${grand}`, W - 16, H - 16);
+  ctx.fillText(`${grand}`, W - 14, H - 12);
 
   ctx.textAlign = 'left';
 
@@ -561,7 +591,7 @@ async function generateRollCard(username, expr, grand, breakdown, bundleKey) {
 //  INVENTORY CARD GENERATOR
 // ══════════════════════════════════════════════
 async function generateInventoryCard(player, username, page = 1) {
-  const W = 520;
+  const W = 560;
   const bundleKey = player.equipped_bundle || 'default';
   const bundle = getBundle(bundleKey);
   const bgType = bundle ? bundle.bgType : 'default';
@@ -623,12 +653,14 @@ async function generateInventoryCard(player, username, page = 1) {
     ctx.strokeStyle = `rgba(${ec.r},${ec.g},${ec.b},0.25)`;
     ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.8)`;
+    const badgeTextColor = bgType === 'gallop_mejiro' ? '#1a6e2e' : `rgba(${ec.r},${ec.g},${ec.b},0.8)`;
+    ctx.fillStyle = badgeTextColor;
     ctx.font = `9px ${CANVAS_FONT}`;
     ctx.fillText(`✦ ${bundleName}`, bx + 8, by + 11);
 
     // Streak top right
-    ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.8)`;
+    const streakColor = bgType === 'gallop_mejiro' ? '#1a6e2e' : `rgba(${ec.r},${ec.g},${ec.b},0.9)`;
+    ctx.fillStyle = streakColor;
     ctx.font = `bold 13px ${CANVAS_FONT}`;
     ctx.textAlign = 'right';
     ctx.fillText(`STREAK · ${player.streak}`, W - 20, 43);
@@ -712,9 +744,9 @@ async function generateInventoryCard(player, username, page = 1) {
 
     const ownedBundleCount = db.prepare('SELECT COUNT(*) as cnt FROM owned_bundles WHERE user_id = ?').get(player.user_id)?.cnt || 0;
     const items = [
-      { icon: '🎲', val: `×${player.inv_reroll || 0}`, label: 'RE-ROLL' },
-      { icon: '✦', val: `${ownedBundleCount}`, label: 'BUNDLES' },
-      { icon: '🏇', val: `${player.streak}/7`, label: 'STREAK' },
+      { icon: 'x', val: `${player.inv_reroll || 0}`, label: 'RE-ROLL' },
+      { icon: '*', val: `${ownedBundleCount}`, label: 'BUNDLES' },
+      { icon: '~', val: `${player.streak}/7`, label: 'STREAK' },
     ];
 
     items.forEach((item, i) => {
@@ -1014,24 +1046,38 @@ function buildDiceText(parsed, tokens) {
   const lines = [];
   let grand = 0;
   let sign = 1;
-  let allResults = [];
 
   for (const t of tokens) {
     if (t.type === 'op') { sign = t.value; continue; }
-    if (t.type === 'num') { grand += sign * t.value; lines.push(`${sign > 0 ? '+' : '-'}${t.value}`); sign = 1; continue; }
+    if (t.type === 'num') { grand += sign * t.value; lines.push({ type:'num', text: `${sign > 0 ? '+' : '-'}${t.value}` }); sign = 1; continue; }
     if (t.type === 'dice') {
       let rolls = rollDice(t.num, t.sides);
-      let kept = rolls;
-      if (mode === 'adv')  { rolls = rollDice(t.num, t.sides); kept = [Math.max(...rolls, ...kept)]; }
-      if (mode === 'dis')  { rolls = rollDice(t.num, t.sides); kept = [Math.min(...rolls, ...kept)]; }
+      let kept = [...rolls];
+      if (mode === 'adv')  { const r2 = rollDice(t.num, t.sides); const best = Math.max(...rolls, ...r2); kept = [best]; rolls = [...rolls, ...r2]; }
+      if (mode === 'dis')  { const r2 = rollDice(t.num, t.sides); const worst = Math.min(...rolls, ...r2); kept = [worst]; rolls = [...rolls, ...r2]; }
       if (t.keep) {
         const sorted = [...rolls].sort((a,b) => b-a);
         kept = t.keep.type === 'kh' ? sorted.slice(0, t.keep.n) : sorted.slice(sorted.length - t.keep.n);
       }
+      const dropped = rolls.filter(r => {
+        const idx = kept.indexOf(r);
+        if (idx !== -1) { kept.splice(idx, 1); return false; }
+        return true;
+      });
+      // rebuild kept
+      kept = t.keep ? (t.keep.type === 'kh' ? [...rolls].sort((a,b) => b-a).slice(0, t.keep.n) : [...rolls].sort((a,b) => b-a).slice(rolls.length - t.keep.n)) : rolls;
+      if (mode === 'adv') kept = [Math.max(...rolls)];
+      if (mode === 'dis') kept = [Math.min(...rolls)];
+      const droppedSet = [];
+      const keptCopy = [...kept];
+      for (const r of rolls) {
+        const ki = keptCopy.indexOf(r);
+        if (ki !== -1) { keptCopy.splice(ki, 1); }
+        else droppedSet.push(r);
+      }
       const sum = kept.reduce((a,b) => a+b, 0);
       grand += sign * sum;
-      allResults.push(...kept);
-      lines.push(`${sign < 0 ? '-' : ''}[${rolls.join(', ')}${t.keep ? ` → keep ${t.keep.type.toUpperCase()}${t.keep.n}: ${kept.join(', ')}` : ''}] = ${sign * sum}`);
+      lines.push({ type:'dice', rolls, kept, dropped: droppedSet, expr: `${t.num}d${t.sides}${t.keep ? t.keep.type+t.keep.n : ''}`, sum: sign * sum, sign });
       sign = 1;
     }
   }
@@ -1042,8 +1088,16 @@ async function buildRollEmbed(parsed, tokens, username, userId) {
   const { lines, grand } = buildDiceText(parsed, tokens);
   const p = getPlayer(userId);
   const bundleKey = p.equipped_bundle || 'default';
-  const expr = parsed.rollName || tokens.map(t => t.type === 'dice' ? `${t.num}d${t.sides}` : (t.type === 'op' ? (t.value > 0 ? '+' : '-') : t.value)).join('');
-  const breakdown = lines.join(' · ');
+  const expr = parsed.rollName || tokens.map(t => t.type === 'dice' ? `${t.num}d${t.sides}${t.keep ? t.keep.type+t.keep.n : ''}` : (t.type === 'op' ? (t.value > 0 ? '+' : '-') : t.value)).join('');
+  // สร้าง breakdown text สำหรับ canvas (plain text)
+  const breakdown = lines.map(l => {
+    if (l.type === 'num') return l.text;
+    const parts = l.rolls.map(r => {
+      const isDropped = l.dropped.includes(r);
+      return isDropped ? `(${r})` : `${r}`;
+    });
+    return parts.join(' ');
+  }).join(' | ');
 
   try {
     const buffer = await generateRollCard(username, expr, grand, breakdown, bundleKey);
@@ -1057,7 +1111,7 @@ async function buildRollEmbed(parsed, tokens, username, userId) {
     const textLines = [];
     if (parsed.mode === 'adv') textLines.push('`ADVANTAGE`');
     if (parsed.mode === 'dis') textLines.push('`DISADVANTAGE`');
-    textLines.push(...lines);
+    textLines.push(...lines.map(l => l.type === 'num' ? l.text : `[${l.rolls.map(r => l.dropped.includes(r) ? `~~${r}~~` : r).join(', ')}] = ${l.sum}`));
     textLines.push(`\n@${username}\u2003**${grand}**`);
     const embed = new EmbedBuilder().setColor(0x444444).setDescription(textLines.join('\n'));
     return { embeds: [embed] };
@@ -1181,8 +1235,20 @@ const commands = [
 
   new SlashCommandBuilder().setName('gift').setDescription('[Staff] แจก bundle หรือ item')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addStringOption(o => o.setName('targets').setDescription('@user หรือ @role (หลายคนได้)').setRequired(true))
-    .addStringOption(o => o.setName('item').setDescription('bundle_id หรือ reroll').setRequired(true)),
+    .addMentionableOption(o => o.setName('targets').setDescription('@user หรือ @role').setRequired(true))
+    .addStringOption(o => o.setName('item').setDescription('ของที่จะแจก').setRequired(true)
+      .addChoices(
+        { name: 'Re-roll', value: 'reroll' },
+        { name: 'Make a Debut', value: 'make_a_debut' },
+        { name: 'Beyond the Dream', value: 'beyond_the_dream' },
+        { name: 'The Road to Glory', value: 'the_road_to_glory' },
+        { name: 'He Who Commands the Era', value: 'he_who_commands' },
+        { name: 'Coronation of Emperor', value: 'coronation_of_emperor' },
+        { name: 'The All Rounder', value: 'the_all_rounder' },
+        { name: 'La Noblesse', value: 'la_noblesse' },
+        { name: 'The Rising Son', value: 'the_rising_son' },
+        { name: 'The Mighty One', value: 'the_mighty_one' },
+      )),
 
   new SlashCommandBuilder().setName('take').setDescription('[Staff] ลบเงิน')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
@@ -1205,10 +1271,10 @@ const commands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
     .addUserOption(o => o.setName('user').setDescription('สมาชิก').setRequired(true))
     .addIntegerOption(o => o.setName('slot').setDescription('ช่อง 1-3').setRequired(true).setMinValue(1).setMaxValue(3))
-    .addStringOption(o => o.setName('race').setDescription('ชื่อการแข่ง').setRequired(true))
-    .addStringOption(o => o.setName('rank').setDescription('อันดับ เช่น 1st').setRequired(true))
-    .addStringOption(o => o.setName('grade').setDescription('เกรด เช่น G1').setRequired(true))
-    .addStringOption(o => o.setName('year').setDescription('ปี เช่น 2026').setRequired(true)),
+    .addStringOption(o => o.setName('race').setDescription('ชื่อการแข่ง (ใส่ clear เพื่อลบ)').setRequired(true))
+    .addStringOption(o => o.setName('rank').setDescription('อันดับ เช่น 1st').setRequired(false))
+    .addStringOption(o => o.setName('grade').setDescription('เกรด เช่น G1').setRequired(false))
+    .addStringOption(o => o.setName('year').setDescription('ปี เช่น 2026').setRequired(false)),
 
 ].map(c => c.toJSON());
 
@@ -1227,8 +1293,10 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.DirectMessages,
   ],
 });
+// ตรวจสอบว่าเปิด Message Content Intent ใน Discord Developer Portal แล้ว
 
 client.once('clientReady', async () => {
   console.log(`${BOTNAME} v6.0 online: ${client.user.tag}`);
@@ -1255,7 +1323,7 @@ client.on('interactionCreate', async interaction => {
     else if (interaction.isStringSelectMenu()) await handleSelect(interaction);
   } catch (e) {
     console.error(e);
-    const rep = { content: 'Error: กรุณาลองใหม่ครับ', ephemeral: true };
+    const rep = { content: 'Error: กรุณาลองใหม่ครับ', flags: 64 };
     if (interaction.replied || interaction.deferred) await interaction.followUp(rep);
     else await interaction.reply(rep);
   }
@@ -1279,7 +1347,7 @@ async function handleSlash(interaction) {
   if (cmd === 'roll') {
     const raw = interaction.options.getString('expression') || '1d20';
     const parsed = parseRoll(raw);
-    if (parsed.err) return interaction.reply({ content: `Error: ${parsed.err}`, ephemeral: true });
+    if (parsed.err) return interaction.reply({ content: `Error: ${parsed.err}`, flags: 64 });
     const rollResult = await buildRollEmbed(parsed, parsed.tokens, username, userId);
     return interaction.reply(rollResult);
   }
@@ -1289,9 +1357,7 @@ async function handleSlash(interaction) {
     const p = getPlayer(userId);
     const today = getDayKey();
     if (p.last_daily === today) return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle('Daily').setDescription('รับแล้ววันนี้ครับ มาใหม่ตี 4!')],
-      ephemeral: true
-    });
+      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle('Daily').setDescription('รับแล้ววันนี้ครับ มาใหม่ตี 4!')], flags: 64 });
     const yest = new Date(Date.now() + 7*60*60*1000);
     yest.setUTCDate(yest.getUTCDate() - 1);
     if (yest.getUTCHours() < 4) yest.setUTCDate(yest.getUTCDate() - 1);
@@ -1345,8 +1411,8 @@ async function handleSlash(interaction) {
   if (cmd === 'convert') {
     const amount = interaction.options.getInteger('amount');
     const p = getPlayer(userId);
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, ephemeral: true });
-    if (amount % EXCHANGE_RATE !== 0) return interaction.reply({ content: `ต้องแลกเป็นทวีคูณของ ${EXCHANGE_RATE} ครับ`, ephemeral: true });
+    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, flags: 64 });
+    if (amount % EXCHANGE_RATE !== 0) return interaction.reply({ content: `ต้องแลกเป็นทวีคูณของ ${EXCHANGE_RATE} ครับ`, flags: 64 });
     const rc = amount / EXCHANGE_RATE;
     updatePlayer(userId, { gold: p.gold - amount, rc: p.rc + rc });
     return interaction.reply({
@@ -1359,7 +1425,7 @@ async function handleSlash(interaction) {
   if (cmd === 'use') {
     const amount = interaction.options.getInteger('amount') || 1;
     const p = getPlayer(userId);
-    if ((p.inv_reroll || 0) < amount) return interaction.reply({ content: `Re-roll ไม่พอครับ (มี ${p.inv_reroll || 0})`, ephemeral: true });
+    if ((p.inv_reroll || 0) < amount) return interaction.reply({ content: `Re-roll ไม่พอครับ (มี ${p.inv_reroll || 0})`, flags: 64 });
     updatePlayer(userId, { inv_reroll: p.inv_reroll - amount });
     return interaction.reply({
       embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle('ใช้ Re-roll')
@@ -1371,7 +1437,7 @@ async function handleSlash(interaction) {
   if (cmd === 'equip') {
     const p = getPlayer(userId);
     const owned = getOwnedBundles(userId);
-    if (owned.length === 0) return interaction.reply({ content: 'ยังไม่มี bundle ครับ', ephemeral: true });
+    if (owned.length === 0) return interaction.reply({ content: 'ยังไม่มี bundle ครับ', flags: 64 });
     const options = owned.map(id => {
       const b = getBundle(id);
       if (!b) return null;
@@ -1402,9 +1468,9 @@ async function handleSlash(interaction) {
   if (cmd === 'transfer') {
     const target = interaction.options.getUser('user');
     const amount = interaction.options.getInteger('amount');
-    if (target.id === userId) return interaction.reply({ content: 'โอนให้ตัวเองไม่ได้ครับ', ephemeral: true });
+    if (target.id === userId) return interaction.reply({ content: 'โอนให้ตัวเองไม่ได้ครับ', flags: 64 });
     const p = getPlayer(userId);
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, ephemeral: true });
+    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, flags: 64 });
     updatePlayer(userId, { gold: p.gold - amount });
     const tp = getPlayer(target.id);
     updatePlayer(target.id, { gold: tp.gold + amount });
@@ -1432,9 +1498,9 @@ async function handleSlash(interaction) {
     const amount = interaction.options.getInteger('amount');
     const choice = interaction.options.getString('choice');
     const p = getPlayer(userId);
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, ephemeral: true });
+    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, flags: 64 });
     const loss = applyLoss(userId, amount);
-    if (!loss.ok) return interaction.reply({ content: loss.reason, ephemeral: true });
+    if (!loss.ok) return interaction.reply({ content: loss.reason, flags: 64 });
     const result = randF() < 0.42 ? choice : (choice === 'heads' ? 'tails' : 'heads');
     const win = result === choice;
     const choiceEmoji = choice === 'heads' ? '☀️ HEADS' : '🌙 TAILS';
@@ -1470,9 +1536,9 @@ async function handleSlash(interaction) {
   if (cmd === 'slots') {
     const amount = interaction.options.getInteger('amount');
     const p = getPlayer(userId);
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, ephemeral: true });
+    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, flags: 64 });
     const loss = applyLoss(userId, amount);
-    if (!loss.ok) return interaction.reply({ content: loss.reason, ephemeral: true });
+    if (!loss.ok) return interaction.reply({ content: loss.reason, flags: 64 });
 
     const win = randF() < 0.18;
     const reels = win ? [spinSlot(), null, null] : [spinSlot(), spinSlot(), spinSlot()];
@@ -1536,10 +1602,10 @@ async function handleSlash(interaction) {
   if (cmd === 'blackjack') {
     const amount = interaction.options.getInteger('amount');
     const p = getPlayer(userId);
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, ephemeral: true });
-    if (bjGames.has(userId)) return interaction.reply({ content: 'มีเกมค้างอยู่ครับ', ephemeral: true });
+    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, flags: 64 });
+    if (bjGames.has(userId)) return interaction.reply({ content: 'มีเกมค้างอยู่ครับ', flags: 64 });
     const loss = applyLoss(userId, amount);
-    if (!loss.ok) return interaction.reply({ content: loss.reason, ephemeral: true });
+    if (!loss.ok) return interaction.reply({ content: loss.reason, flags: 64 });
     const deck = makeDeck();
     const player_hand = [deck.pop(), deck.pop()];
     const dealer_hand = [deck.pop(), deck.pop()];
@@ -1578,11 +1644,11 @@ async function handleSlash(interaction) {
     const amount = interaction.options.getInteger('amount');
     const bet = interaction.options.getString('bet').toLowerCase();
     const p = getPlayer(userId);
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, ephemeral: true });
+    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, flags: 64 });
     const validBets = ['red','black','odd','even','1-18','19-36',...Array.from({length:37},(_,i)=>String(i))];
-    if (!validBets.includes(bet)) return interaction.reply({ content: 'เดิมพันไม่ถูกต้องครับ', ephemeral: true });
+    if (!validBets.includes(bet)) return interaction.reply({ content: 'เดิมพันไม่ถูกต้องครับ', flags: 64 });
     const loss = applyLoss(userId, amount);
-    if (!loss.ok) return interaction.reply({ content: loss.reason, ephemeral: true });
+    if (!loss.ok) return interaction.reply({ content: loss.reason, flags: 64 });
     const n = rand(0, 36);
     const color = roulColor(n);
     const emoji = color === 'red' ? '🔴' : color === 'black' ? '⚫' : '🟢';
@@ -1670,7 +1736,7 @@ async function handleSlash(interaction) {
       const name    = interaction.options.getString('name');
       const team    = interaction.options.getString('team');
       const trainer = interaction.options.getString('trainer');
-      if (!name && !team && !trainer) return interaction.reply({ content: 'กรุณาใส่อย่างน้อย 1 อย่างครับ', ephemeral: true });
+      if (!name && !team && !trainer) return interaction.reply({ content: 'กรุณาใส่อย่างน้อย 1 อย่างครับ', flags: 64 });
       const updates = {};
       if (name)    updates.char_name    = name;
       if (team)    updates.team_name    = team;
@@ -1688,7 +1754,7 @@ async function handleSlash(interaction) {
 
   // Staff: /give
   if (cmd === 'give') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
     const target = interaction.options.getUser('user');
     const currency = interaction.options.getString('currency');
     const amount = interaction.options.getInteger('amount');
@@ -1702,21 +1768,20 @@ async function handleSlash(interaction) {
 
   // Staff: /gift (รับ user หรือ role)
   if (cmd === 'gift') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
     await interaction.deferReply();
-    const targetsStr = interaction.options.getString('targets');
+    const target = interaction.options.getMentionable('targets');
     const item = interaction.options.getString('item');
     const guild = interaction.guild;
     await guild.members.fetch();
 
-    // Parse mentions — user หรือ role
-    const userMentions = [...targetsStr.matchAll(/<@!?(\d+)>/g)].map(m => m[1]);
-    const roleMentions = [...targetsStr.matchAll(/<@&(\d+)>/g)].map(m => m[1]);
-
-    const targetIds = new Set(userMentions);
-    for (const roleId of roleMentions) {
-      const role = guild.roles.cache.get(roleId);
-      if (role) role.members.forEach(m => targetIds.add(m.id));
+    const targetIds = new Set();
+    if (target.members) {
+      // เป็น Role
+      target.members.forEach(m => targetIds.add(m.id));
+    } else if (target.id) {
+      // เป็น User
+      targetIds.add(target.id);
     }
 
     if (targetIds.size === 0) return interaction.editReply({ content: 'ไม่พบ user หรือ role ที่ระบุครับ' });
@@ -1744,7 +1809,7 @@ async function handleSlash(interaction) {
 
   // Staff: /take
   if (cmd === 'take') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
     const target = interaction.options.getUser('user');
     const currency = interaction.options.getString('currency');
     const amount = interaction.options.getInteger('amount');
@@ -1759,7 +1824,7 @@ async function handleSlash(interaction) {
 
   // Staff: /revoke
   if (cmd === 'revoke') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
     const target = interaction.options.getUser('user');
     const item = interaction.options.getString('item');
     const amount = interaction.options.getInteger('amount');
@@ -1775,8 +1840,8 @@ async function handleSlash(interaction) {
 
   // Staff: /inspect
   if (cmd === 'inspect') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
-    await interaction.deferReply({ ephemeral: true });
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
+    await interaction.deferReply({ flags: 64 });
     const target = interaction.options.getUser('user');
     const tp = getPlayer(target.id);
     const owned = getOwnedBundles(target.id);
@@ -1802,7 +1867,7 @@ async function handleSlash(interaction) {
 
   // Staff: /showcase
   if (cmd === 'showcase') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', ephemeral: true });
+    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
     const target = interaction.options.getUser('user');
     const slot = interaction.options.getInteger('slot');
     const race  = interaction.options.getString('race');
@@ -1811,11 +1876,21 @@ async function handleSlash(interaction) {
     const year  = interaction.options.getString('year');
     getProfile(target.id);
     const prefix = `showcase_${slot}`;
+    if (race.toLowerCase() === 'clear') {
+      db.prepare(`UPDATE profiles SET ${prefix}_race='', ${prefix}_rank='', ${prefix}_grade='', ${prefix}_year='' WHERE user_id=?`).run(target.id);
+      return interaction.reply({
+        embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('[Staff] Showcase Cleared')
+          .setDescription(`ลบ showcase ช่อง ${slot} ของ <@${target.id}> แล้วครับ`)]
+      });
+    }
+    const rankVal  = rank  || '';
+    const gradeVal = grade || '';
+    const yearVal  = year  || '';
     db.prepare(`UPDATE profiles SET ${prefix}_race=?, ${prefix}_rank=?, ${prefix}_grade=?, ${prefix}_year=? WHERE user_id=?`)
-      .run(race, rank, grade, year, target.id);
+      .run(race, rankVal, gradeVal, yearVal, target.id);
     return interaction.reply({
       embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('[Staff] Showcase Updated')
-        .setDescription(`อัพเดท showcase ช่อง ${slot} ของ <@${target.id}> แล้วครับ\n**${race}** — ${rank} (${grade} · ${year})`)]
+        .setDescription(`อัพเดท showcase ช่อง ${slot} ของ <@${target.id}> แล้วครับ\n**${race}** — ${rankVal} (${gradeVal} · ${yearVal})`)]
     });
   }
 }
@@ -1829,12 +1904,12 @@ async function handleSelect(interaction) {
 
   // Equip select
   if (id.startsWith('equip_select_')) {
-    if (!id.endsWith(userId)) return interaction.reply({ content: 'นี่ไม่ใช่ของคุณครับ', ephemeral: true });
+    if (!id.endsWith(userId)) return interaction.reply({ content: 'นี่ไม่ใช่ของคุณครับ', flags: 64 });
     const bundleId = interaction.values[0];
     const bundle = getBundle(bundleId);
-    if (!bundle) return interaction.reply({ content: 'ไม่พบ bundle ครับ', ephemeral: true });
+    if (!bundle) return interaction.reply({ content: 'ไม่พบ bundle ครับ', flags: 64 });
     const owned = getOwnedBundles(userId);
-    if (!owned.includes(bundleId)) return interaction.reply({ content: 'ยังไม่มี bundle นี้ครับ', ephemeral: true });
+    if (!owned.includes(bundleId)) return interaction.reply({ content: 'ยังไม่มี bundle นี้ครับ', flags: 64 });
     updatePlayer(userId, { equipped_bundle: bundleId });
     const color = parseInt(bundle.emblemColor.replace('#',''), 16);
     return interaction.update({
@@ -1845,19 +1920,17 @@ async function handleSelect(interaction) {
   }
 
   if (id.startsWith('shop_buy_')) {
-    if (!id.endsWith(userId)) return interaction.reply({ content: 'นี่ไม่ใช่ shop ของคุณครับ', ephemeral: true });
+    if (!id.endsWith(userId)) return interaction.reply({ content: 'นี่ไม่ใช่ shop ของคุณครับ', flags: 64 });
     const bundleId = interaction.values[0];
     const bundle = GALLOP_BUNDLES[bundleId];
-    if (!bundle) return interaction.reply({ content: 'ไม่พบ bundle ครับ', ephemeral: true });
+    if (!bundle) return interaction.reply({ content: 'ไม่พบ bundle ครับ', flags: 64 });
 
     const owned = getOwnedBundles(userId);
-    if (owned.includes(bundleId)) return interaction.reply({ content: `มี **${bundle.name}** อยู่แล้วครับ`, ephemeral: true });
+    if (owned.includes(bundleId)) return interaction.reply({ content: `มี **${bundle.name}** อยู่แล้วครับ`, flags: 64 });
 
     const p = getPlayer(userId);
     if (p.rc < BUNDLE_PRICE) return interaction.reply({
-      content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${BUNDLE_PRICE.toLocaleString()})`,
-      ephemeral: true
-    });
+      content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${BUNDLE_PRICE.toLocaleString()})`, flags: 64 });
 
     // Confirm button
     const row = new ActionRowBuilder().addComponents(
@@ -1870,9 +1943,7 @@ async function handleSelect(interaction) {
       embeds: [new EmbedBuilder().setColor(parseInt(bundle.emblemColor.slice(1), 16))
         .setTitle(`ยืนยันการซื้อ`)
         .setDescription(`กำลังจะซื้อ **${bundle.name}**\nม้า: *${bundle.horse}*\n\nราคา: **${BUNDLE_PRICE.toLocaleString()} RC**\nRC ที่มี: **${p.rc.toLocaleString()} RC**\nRC หลังซื้อ: **${(p.rc - BUNDLE_PRICE).toLocaleString()} RC**`)],
-      components: [row],
-      ephemeral: true
-    });
+      components: [row], flags: 64 });
   }
 }
 
@@ -1886,7 +1957,7 @@ async function handleButton(interaction) {
   // Inventory page toggle
   if (id.startsWith('inv_p1_') || id.startsWith('inv_p2_')) {
     const targetUser = id.split('_')[2];
-    if (targetUser !== userId) return interaction.reply({ content: 'นี่ไม่ใช่ inventory ของคุณครับ', ephemeral: true });
+    if (targetUser !== userId) return interaction.reply({ content: 'นี่ไม่ใช่ inventory ของคุณครับ', flags: 64 });
     const page = id.startsWith('inv_p1_') ? 1 : 2;
     await interaction.deferUpdate();
     const p = getPlayer(userId);
@@ -1907,10 +1978,10 @@ async function handleButton(interaction) {
     const parts = id.split('_');
     const targetUser = parts[2];
     const bundleId = parts.slice(3).join('_');
-    if (targetUser !== userId) return interaction.reply({ content: 'นี่ไม่ใช่ shop ของคุณครับ', ephemeral: true });
+    if (targetUser !== userId) return interaction.reply({ content: 'นี่ไม่ใช่ shop ของคุณครับ', flags: 64 });
 
     const bundle = GALLOP_BUNDLES[bundleId];
-    if (!bundle) return interaction.reply({ content: 'ไม่พบ bundle ครับ', ephemeral: true });
+    if (!bundle) return interaction.reply({ content: 'ไม่พบ bundle ครับ', flags: 64 });
 
     const p = getPlayer(userId);
     const owned = getOwnedBundles(userId);
@@ -1935,9 +2006,9 @@ async function handleButton(interaction) {
 
   // Blackjack
   if (!id.startsWith('bj_')) return;
-  if (!id.endsWith(userId)) return interaction.reply({ content: 'นี่ไม่ใช่เกมของคุณครับ', ephemeral: true });
+  if (!id.endsWith(userId)) return interaction.reply({ content: 'นี่ไม่ใช่เกมของคุณครับ', flags: 64 });
   const game = bjGames.get(userId);
-  if (!game) return interaction.reply({ content: 'หมดเวลาแล้วครับ', ephemeral: true });
+  if (!game) return interaction.reply({ content: 'หมดเวลาแล้วครับ', flags: 64 });
 
   if (id.startsWith('bj_hit_')) {
     game.player.push(game.deck.pop());
