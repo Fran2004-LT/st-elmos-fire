@@ -1620,8 +1620,7 @@ async function handleSlash(interaction) {
         .addFields(
           { name: '🎲 ลูกเต๋า', value: '`!r 2d30` — ทอยด่วน\n`/roll expression` — ทอยผ่าน slash command\nรองรับ `kh` `kl` `advantage` `disadvantage`', inline: false },
           { name: '💰 เศรษฐกิจ', value: '`/daily` — รับรางวัลประจำวัน (รีเซ็ตตี 4)\n`/inventory` — ดูกระเป๋าสตางค์และไอเทม\n`/convert amount` — แลก 3 Gold = 1 RC\n`/use` — ใช้ Re-roll\n`/transfer @user amount` — โอน Gold ให้สมาชิก', inline: false },
-          { name: '✦ Bundle', value: '`/shop` — ดู Gallop Collection และซื้อ bundle (2,500 RC)
-`/equip` — เลือกใส่ bundle จาก dropdown', inline: false },
+          { name: '✦ Bundle', value: '`/shop` — ดู Gallop Collection และซื้อ bundle (2,500 RC)\n`/equip` — เลือกใส่ bundle จาก dropdown', inline: false },
           { name: '🎰 การพนัน', value: '`/coinflip amount` — ทอยเหรียญ หัว/ก้อย (42% ชนะ 2x)\n`/slots amount` — สล็อต (18% ชนะ + Progressive Jackpot)\n`/blackjack amount` — แบล็คแจ็ค dealer hits to 18\n`/roulette amount bet` — รูเล็ต (2x–36x)', inline: false },
           { name: '👤 Profile', value: '`/profile set` — ตั้งชื่อตัวละคร ทีม และเทรนเนอร์', inline: false },
           { name: '⚙️ Staff', value: '`/give` `/take` — แจก/ลบเงิน\n`/gift` — แจก bundle หรือ Re-roll (รับ @user หรือ @role)\n`/revoke` — ลบ item\n`/inspect @user` — ดู inventory สมาชิก\n`/showcase @user` — ตั้ง Race Showcase', inline: false },
