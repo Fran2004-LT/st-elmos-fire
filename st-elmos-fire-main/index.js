@@ -1228,7 +1228,7 @@ const commands = [
   // Staff
   new SlashCommandBuilder().setName('give').setDescription('[Staff] แจกเงิน')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption(o => o.setName('user').setDescription('ผู้รับ').setRequired(true))
+    .addMentionableOption(o => o.setName('targets').setDescription('@user หรือ @role').setRequired(true))
     .addStringOption(o => o.setName('currency').setDescription('สกุลเงิน').setRequired(true)
       .addChoices({ name: 'Gold', value: 'gold' }, { name: 'Rainbow Carrot', value: 'rc' }))
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน').setRequired(true).setMinValue(1)),
@@ -1755,14 +1755,35 @@ async function handleSlash(interaction) {
   // Staff: /give
   if (cmd === 'give') {
     if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
-    const target = interaction.options.getUser('user');
+    await interaction.deferReply();
+    const target = interaction.options.getMentionable('targets');
     const currency = interaction.options.getString('currency');
     const amount = interaction.options.getInteger('amount');
-    const tp = getPlayer(target.id);
-    updatePlayer(target.id, { [currency]: tp[currency] + amount });
-    return interaction.reply({
+    const guild = interaction.guild;
+    await guild.members.fetch();
+
+    const targetIds = new Set();
+    if (target.members) {
+      target.members.forEach(m => targetIds.add(m.id));
+    } else if (target.id) {
+      targetIds.add(target.id);
+    }
+
+    if (targetIds.size === 0) return interaction.editReply({ content: 'ไม่พบ user หรือ role ที่ระบุครับ' });
+
+    let successCount = 0;
+    for (const tid of targetIds) {
+      try {
+        const tp = getPlayer(tid);
+        updatePlayer(tid, { [currency]: (tp[currency] || 0) + amount });
+        successCount++;
+      } catch (e) { console.error('Give error for ' + tid + ':', e); }
+    }
+
+    const currencyLabel = currency === 'gold' ? 'Gold 🪙' : 'RC 🌈';
+    return interaction.editReply({
       embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('[Staff] Give')
-        .setDescription(`แจก **${amount.toLocaleString()} ${currency === 'gold' ? 'Gold 🪙' : 'RC 🌈'}** ให้ <@${target.id}> แล้วครับ`)]
+        .setDescription(`แจก **${amount.toLocaleString()} ${currencyLabel}** ให้ ${successCount} คน เรียบร้อยแล้วครับ`)]
     });
   }
 
