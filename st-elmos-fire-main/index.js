@@ -33,20 +33,24 @@ if (existsSync(FONT_PATH_THAI)) {
   registerFont(FONT_PATH_THAI, { family: 'NotoSansThai' });
   console.log('Font loaded: NotoSansThai');
 }
-// Register NotoColorEmoji สำหรับ emoji
-const EMOJI_FONT_PATHS = [
-  '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf',
-  '/usr/share/fonts/noto/NotoColorEmoji.ttf',
-  '/usr/share/fonts/truetype/NotoColorEmoji.ttf',
-];
-let emojiLoaded = false;
-for (const ep of EMOJI_FONT_PATHS) {
-  if (existsSync(ep)) {
-    try { registerFont(ep, { family: 'NotoColorEmoji' }); emojiLoaded = true; console.log('Font loaded: NotoColorEmoji'); break; } catch(e) {}
-  }
-}
 const BASE_FONT = existsSync(FONT_PATH_THAI) ? 'NotoSansThai' : (existsSync(FONT_PATH) ? 'NotoSans' : 'sans-serif');
-const CANVAS_FONT = (emojiLoaded ? 'NotoColorEmoji, ' : '') + BASE_FONT;
+const CANVAS_FONT = BASE_FONT;
+
+// Emoji PNG map — render emoji เป็น image แทน font
+const EMOJI_DIR = join(__dirname, 'assets', 'emoji');
+const EMOJI_MAP = { '\u{1FA99}': '1fa99.png', '\u{1F308}': '1f308.png', '\u{1F3C6}': '1f3c6.png' };
+const emojiCache = {};
+async function drawEmoji(ctx, emoji, x, y, size = 20) {
+  const file = EMOJI_MAP[emoji];
+  if (!file) return;
+  const p = join(EMOJI_DIR, file);
+  if (!existsSync(p)) return;
+  if (!emojiCache[emoji]) {
+    const { loadImage } = await import('canvas');
+    emojiCache[emoji] = await loadImage(p);
+  }
+  ctx.drawImage(emojiCache[emoji], x - size / 2, y - size, size, size);
+}
 
 // ══════════════════════════════════════════════
 //  CONFIG
@@ -719,8 +723,7 @@ async function generateInventoryCard(player, username, page = 1) {
     ctx.strokeStyle = isLight ? 'rgba(212,175,55,0.2)' : 'rgba(212,175,55,0.2)';
     ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.font = `22px ${CANVAS_FONT}`;
-    ctx.fillText('🪙', 30, boxY + 34);
+    await drawEmoji(ctx, '🪙', 30 + 11, boxY + 34, 22);
     ctx.font = `bold 20px ${CANVAS_FONT}`;
     ctx.fillStyle = isLight ? '#B8860B' : '#E8CC80';
     ctx.fillText(player.gold.toLocaleString(), 58, boxY + 30);
@@ -736,8 +739,7 @@ async function generateInventoryCard(player, username, page = 1) {
     ctx.strokeStyle = isLight ? 'rgba(100,160,220,0.2)' : 'rgba(100,160,220,0.15)';
     ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.font = `22px ${CANVAS_FONT}`;
-    ctx.fillText('🌈', rcX + 10, boxY + 34);
+    await drawEmoji(ctx, '🌈', rcX + 10 + 11, boxY + 34, 22);
     ctx.font = `bold 20px ${CANVAS_FONT}`;
     ctx.fillStyle = isLight ? '#3A8EC8' : '#90C8FF';
     ctx.fillText(player.rc.toLocaleString(), rcX + 38, boxY + 30);
@@ -920,7 +922,8 @@ async function generateInventoryCard(player, username, page = 1) {
     // Showcase title
     ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.45)`;
     ctx.font = `9px ${CANVAS_FONT}`;
-    ctx.fillText('🏆  RACE SHOWCASE', 20, 100);
+    await drawEmoji(ctx, '🏆', 20 + 9, 100, 16);
+    ctx.fillText('  RACE SHOWCASE', 34, 100);
 
     // Podium
     const showcases = [
