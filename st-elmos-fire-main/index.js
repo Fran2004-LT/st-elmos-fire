@@ -46,7 +46,7 @@ for (const ep of EMOJI_FONT_PATHS) {
   }
 }
 const BASE_FONT = existsSync(FONT_PATH_THAI) ? 'NotoSansThai' : (existsSync(FONT_PATH) ? 'NotoSans' : 'sans-serif');
-const CANVAS_FONT = BASE_FONT + (emojiLoaded ? ', NotoColorEmoji' : '');
+const CANVAS_FONT = (emojiLoaded ? 'NotoColorEmoji, ' : '') + BASE_FONT;
 
 // ══════════════════════════════════════════════
 //  CONFIG
