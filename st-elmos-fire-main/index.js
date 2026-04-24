@@ -291,15 +291,13 @@ function applyWin(userId, betAmount, payoutMult) {
   const p = getPlayer(userId);
   const profit = Math.floor(betAmount * (payoutMult - 1) * (1 - TAX));
   if (p.win_today >= WIN_CAP) {
-    const newGold = p.gold + betAmount;
-    updatePlayer(userId, { gold: newGold });
-    return { ok: false, reason: `ถึง Win Cap แล้วครับ คืนเงิน ${betAmount.toLocaleString()} Gold`, profit: 0, gold: newGold };
+    updatePlayer(userId, { gold: p.gold + betAmount });
+    return { ok: false, reason: `ถึง Win Cap แล้วครับ คืนเงิน ${betAmount.toLocaleString()} Gold`, gold: p.gold + betAmount };
   }
   const capProfit = Math.min(profit, WIN_CAP - p.win_today);
   const finalGain = betAmount + capProfit;
-  const newGold = p.gold + finalGain;
-  updatePlayer(userId, { gold: newGold, win_today: p.win_today + capProfit });
-  return { ok: true, profit: capProfit, gold: newGold };
+  updatePlayer(userId, { gold: p.gold + finalGain, win_today: p.win_today + capProfit });
+  return { ok: true, profit: capProfit, gold: p.gold + finalGain };
 }
 
 function isStaff(member) {
@@ -1547,7 +1545,6 @@ async function handleSlash(interaction) {
     const resultEmoji = result === 'heads' ? '☀️ HEADS' : '🌙 TAILS';
     if (win) {
       const w = applyWin(userId, amount, 2);
-      if (!w.ok) return interaction.reply({ content: w.reason, flags: 64 });
       return interaction.reply({
         embeds: [new EmbedBuilder().setColor(0x57f287)
           .setTitle('🪙 Coinflip — ชนะ!')
@@ -1613,7 +1610,6 @@ async function handleSlash(interaction) {
     if (win) {
       const mult = SLOT_MULT[reels[0]];
       const w = applyWin(userId, amount, mult);
-      if (!w.ok) return interaction.reply({ content: w.reason, flags: 64 });
       return interaction.reply({
         embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🎰 Slots — ชนะ!')
           .addFields(
@@ -1656,7 +1652,6 @@ async function handleSlash(interaction) {
     if (pv === 21) {
       bjGames.delete(userId);
       const w = applyWin(userId, amount, 2.5);
-      if (!w.ok) return interaction.reply({ content: w.reason, flags: 64 });
       return interaction.reply({
         embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('🃏 BLACKJACK! 21! 🎉')
           .addFields(
@@ -1699,7 +1694,6 @@ async function handleSlash(interaction) {
     const pay = roulPay(bet);
     if (win) {
       const w = applyWin(userId, amount, pay);
-      if (!w.ok) return interaction.reply({ content: w.reason, flags: 64 });
       return interaction.reply({
         embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🎡 Roulette — ชนะ!')
           .addFields(
@@ -2131,7 +2125,6 @@ async function handleButton(interaction) {
     const pStr = game.player.map(c => cardStr(c)).join(' ');
     if (dv > 21 || pv > dv) {
       const w = applyWin(userId, game.amount, 4); // 2x payout = 4x mult
-      if (!w.ok) return interaction.update({ embeds: [new EmbedBuilder().setColor(0xffa500).setTitle('🃏 Win Cap!').setDescription(w.reason)], components: [] });
       return interaction.update({
         embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('🃏 Blackjack — Double Hit ชนะ! 🎉')
           .addFields(
@@ -2178,7 +2171,6 @@ async function handleButton(interaction) {
     const pStr = `คุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}`;
     if (dv > 21 || pv > dv) {
       const w = applyWin(userId, game.amount, 2);
-      if (!w.ok) return interaction.update({ embeds: [new EmbedBuilder().setColor(0xffa500).setTitle('🃏 Win Cap!').setDescription(w.reason)], components: [] });
       return interaction.update({
         embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🃏 Blackjack — ชนะ!')
           .addFields(
