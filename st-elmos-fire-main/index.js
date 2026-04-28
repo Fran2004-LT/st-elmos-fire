@@ -60,6 +60,10 @@ const POOL_CONTRIB  = 0.05;
 const STARTING_GOLD = 1500;
 const EXCHANGE_RATE = 3;
 const STAFF_ROLE    = 'Staff';
+const STAFF_ROLE_ID    = '1498609368952864768';
+const TRAINER_ROLE_ID  = '1441818898990366861';
+const UMA_OFFICIAL_ID  = '1441790925025185843';
+const UMA_OC_ID        = '1463876027720798418';
 const OWNER_ID      = process.env.OWNER_ID || '';
 const BOTNAME       = "St. Elmo's Fire";
 const BUNDLE_PRICE  = 2500; // RC
@@ -182,6 +186,7 @@ db.exec(`
   race_reroll     INTEGER DEFAULT 1,
   race_safe       INTEGER DEFAULT 0,
   race_reroll_max INTEGER DEFAULT 1,
+  trainer_reroll  INTEGER DEFAULT 0,
     equipped_bundle TEXT DEFAULT 'default'
   );
 
@@ -225,6 +230,7 @@ const migrations = [
   "ALTER TABLE players ADD COLUMN race_reroll INTEGER DEFAULT 1",
   "ALTER TABLE players ADD COLUMN race_safe INTEGER DEFAULT 0",
   "ALTER TABLE players ADD COLUMN race_reroll_max INTEGER DEFAULT 1",
+  "ALTER TABLE players ADD COLUMN trainer_reroll INTEGER DEFAULT 0",
   // ลบ column เก่าทำไม่ได้ใน SQLite แต่จะ ignore ใน code
 ];
 for (const sql of migrations) {
@@ -308,7 +314,7 @@ function applyWin(userId, betAmount, payoutMult) {
 }
 
 function isStaff(member) {
-  return member.roles.cache.some(r => r.name === STAFF_ROLE) || member.permissions.has(PermissionFlagsBits.Administrator);
+  return member.roles.cache.some(r => r.id === STAFF_ROLE_ID || r.name === STAFF_ROLE) || member.permissions.has(PermissionFlagsBits.Administrator);
 }
 
 // ══════════════════════════════════════════════
@@ -635,7 +641,7 @@ async function generateRollCard(username, expr, grand, breakdown, bundleKey) {
 // ══════════════════════════════════════════════
 //  INVENTORY CARD GENERATOR
 // ══════════════════════════════════════════════
-async function generateInventoryCard(player, username, page = 1) {
+async function generateInventoryCard(player, username, page = 1, member = null) {
   const W = 560;
   const bundleKey = player.equipped_bundle || 'default';
   const bundle = getBundle(bundleKey);
@@ -644,7 +650,14 @@ async function generateInventoryCard(player, username, page = 1) {
   const bundleName = bundle ? bundle.name : 'Default';
   const isLight = false; // debut และ mejiro เปลี่ยนเป็น dark แล้ว
   const isSpecial = bundle ? bundle.isSpecial : false;
-  const H = page === 1 ? (isSpecial ? 420 : 395) : 280;
+  const roles = member?.roles?.cache;
+  const isUma2     = roles ? (roles.has(UMA_OFFICIAL_ID) || roles.has(UMA_OC_ID)) : false;
+  const isTrainer2 = roles ? roles.has(TRAINER_ROLE_ID) : false;
+  const isBoth2    = isUma2 && isTrainer2;
+  const baseH = isSpecial ? 310 : 255;
+  const raceH  = (isUma2 || !isTrainer2) ? 66 : 0;
+  const trainH = isTrainer2 ? 66 : 0;
+  const H = page === 1 ? (baseH + raceH + trainH) : 280;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   const ec = hexToRgb(emblemColor);
@@ -783,6 +796,11 @@ async function generateInventoryCard(player, username, page = 1) {
       ctx.fill();
     }
 
+    // ── ROLE DETECTION ──
+    const roles = member?.roles?.cache;
+    const isUma     = roles ? (roles.has(UMA_OFFICIAL_ID) || roles.has(UMA_OC_ID)) : false;
+    const isTrainer = roles ? roles.has(TRAINER_ROLE_ID) : false;
+
     // ── ECONOMY ITEMS (3 กล่อง) ──
     const itemY = 196;
     const itemW = (W - 52) / 3;
@@ -808,38 +826,68 @@ async function generateInventoryCard(player, username, page = 1) {
       ctx.fillText(item.label, ix + 12, itemY + 40);
     });
 
-    // ── RACE DIVIDER ──
-    const raceDivY = itemY + 56;
-    ctx.fillStyle = `rgba(239,68,68,0.15)`;
-    ctx.fillRect(20, raceDivY, W - 40, 1);
-    ctx.font = `8px ${CANVAS_FONT}`;
-    ctx.fillStyle = 'rgba(239,68,68,0.5)';
-    ctx.textAlign = 'center';
-    ctx.fillText('RACE', W / 2, raceDivY - 4);
-    ctx.textAlign = 'left';
+    let nextSectionY = itemY + 56;
 
-    // ── RACE ITEMS (2 กล่อง) ──
-    const raceItemY = raceDivY + 10;
-    const raceItemW = (W - 52) / 2;
-    const raceItems = [
-      { val: `${player.race_reroll ?? 1}`, label: 'RACE REROLL', fillColor: 'rgba(239,68,68,0.08)', strokeColor: 'rgba(239,68,68,0.2)', valColor: '#F87171' },
-      { val: `${player.race_safe ?? 0}`,   label: 'RACE SAFE',   fillColor: 'rgba(59,130,246,0.08)', strokeColor: 'rgba(59,130,246,0.2)', valColor: '#60A5FA' },
-    ];
-    raceItems.forEach((item, i) => {
-      const ix = 20 + i * (raceItemW + 12);
-      ctx.fillStyle = item.fillColor;
-      drawRoundRect(ctx, ix, raceItemY, raceItemW, 46, 8);
+    // ── RACE SECTION (สาวม้า หรือ ไม่มี role) ──
+    if (isUma || !isTrainer) {
+      ctx.fillStyle = 'rgba(239,68,68,0.15)';
+      ctx.fillRect(20, nextSectionY, W - 40, 1);
+      ctx.font = `8px ${CANVAS_FONT}`;
+      ctx.fillStyle = 'rgba(239,68,68,0.5)';
+      ctx.textAlign = 'center';
+      ctx.fillText('RACE', W / 2, nextSectionY - 4);
+      ctx.textAlign = 'left';
+      nextSectionY += 10;
+      const rItemW = (W - 52) / 3;
+      const rItems = [
+        { val: `${player.race_reroll ?? 1}`, label: 'MAIN REROLL',    fill: 'rgba(239,68,68,0.08)',  stroke: 'rgba(239,68,68,0.2)',  vc: '#F87171' },
+        { val: `${player.inv_reroll || 0}`,  label: 'ONE-USE REROLL', fill: 'rgba(251,191,36,0.08)', stroke: 'rgba(251,191,36,0.2)', vc: '#FBB724' },
+        { val: `${player.race_safe ?? 0}`,   label: 'RACE SAFE',      fill: 'rgba(59,130,246,0.08)', stroke: 'rgba(59,130,246,0.2)', vc: '#60A5FA' },
+      ];
+      rItems.forEach((item, i) => {
+        const ix = 20 + i * (rItemW + 6);
+        ctx.fillStyle = item.fill;
+        drawRoundRect(ctx, ix, nextSectionY, rItemW, 46, 8);
+        ctx.fill();
+        ctx.strokeStyle = item.stroke;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.font = `bold 16px ${CANVAS_FONT}`;
+        ctx.fillStyle = item.vc;
+        ctx.fillText(item.val, ix + 12, nextSectionY + 28);
+        ctx.font = `8px ${CANVAS_FONT}`;
+        ctx.fillStyle = dimColor2;
+        ctx.fillText(item.label, ix + 12, nextSectionY + 40);
+      });
+      nextSectionY += 56;
+    }
+
+    // ── TRAINER SECTION (เทรนเนอร์) ──
+    if (isTrainer) {
+      ctx.fillStyle = 'rgba(168,85,247,0.15)';
+      ctx.fillRect(20, nextSectionY, W - 40, 1);
+      ctx.font = `8px ${CANVAS_FONT}`;
+      ctx.fillStyle = 'rgba(168,85,247,0.5)';
+      ctx.textAlign = 'center';
+      ctx.fillText('TRAINER', W / 2, nextSectionY - 4);
+      ctx.textAlign = 'left';
+      nextSectionY += 10;
+      const tW = W - 40;
+      ctx.fillStyle = 'rgba(168,85,247,0.08)';
+      drawRoundRect(ctx, 20, nextSectionY, tW, 46, 8);
       ctx.fill();
-      ctx.strokeStyle = item.strokeColor;
+      ctx.strokeStyle = 'rgba(168,85,247,0.2)';
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.font = `bold 16px ${CANVAS_FONT}`;
-      ctx.fillStyle = item.valColor;
-      ctx.fillText(item.val, ix + 12, raceItemY + 28);
+      ctx.fillStyle = '#A855F7';
+      ctx.fillText(`${player.trainer_reroll ?? 0}`, 32, nextSectionY + 28);
       ctx.font = `8px ${CANVAS_FONT}`;
       ctx.fillStyle = dimColor2;
-      ctx.fillText(item.label, ix + 12, raceItemY + 40);
-    });
+      ctx.fillText('REROLL TRAINER', 32, nextSectionY + 40);
+      nextSectionY += 56;
+    }
+
 
     // ── STREAK BOX (special bundles only) ──
     if (isSpecial) {
@@ -889,7 +937,7 @@ async function generateInventoryCard(player, username, page = 1) {
     }
 
     // ── FOOTER ──
-    const footerY = isSpecial ? 363 : 307;
+    const footerY = H - 34;
     ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.12)`;
     ctx.fillRect(20, footerY, W - 40, 1);
 
@@ -1386,7 +1434,7 @@ const raceCommands = [
 async function handleRace(interaction) {
   const sub = interaction.options.getSubcommand();
   const userId = interaction.user.id;
-  const isStaffMember = interaction.member?.roles?.cache?.some(r => r.name === STAFF_ROLE);
+  const isStaffMember = interaction.member?.roles?.cache?.some(r => r.id === STAFF_ROLE_ID || r.name === STAFF_ROLE);
   const session = getRaceSession();
 
   if (sub === 'start') {
@@ -1550,7 +1598,7 @@ async function handleRace(interaction) {
 
 async function handleTrain(interaction) {
   const sub = interaction.options.getSubcommand();
-  const isStaffMember = interaction.member?.roles?.cache?.some(r => r.name === STAFF_ROLE);
+  const isStaffMember = interaction.member?.roles?.cache?.some(r => r.id === STAFF_ROLE_ID || r.name === STAFF_ROLE);
 
   if (sub === 'submit') {
     const trainer  = interaction.options.getUser('trainer');
@@ -1581,10 +1629,10 @@ async function handleTrain(interaction) {
     let horseReward = '', trainerReward = '';
     if (type === 'chat') {
       updatePlayer(horse.id, { inv_reroll: (hp.inv_reroll||0) + 1 }); horseReward = '+1 Reroll กิจกรรม';
-      if (tp) { updatePlayer(trainer.id, { inv_reroll: (tp.inv_reroll||0) + 1 }); trainerReward = '+1 Reroll เทรนเนอร์'; }
+      if (tp) { updatePlayer(trainer.id, { trainer_reroll: (tp.trainer_reroll??0) + 1 }); trainerReward = '+1 Reroll Trainer'; }
     } else if (type === 'group') {
       updatePlayer(horse.id, { inv_reroll: (hp.inv_reroll||0) + 2 }); horseReward = '+2 Reroll กิจกรรม';
-      if (tp) { updatePlayer(trainer.id, { inv_reroll: (tp.inv_reroll||0) + 2 }); trainerReward = '+2 Reroll เทรนเนอร์'; }
+      if (tp) { updatePlayer(trainer.id, { trainer_reroll: (tp.trainer_reroll??0) + 2 }); trainerReward = '+2 Reroll Trainer'; }
     } else if (type === 'solo') {
       updatePlayer(horse.id, { race_safe: (hp.race_safe||0) + 1 }); horseReward = '+1 One-use Safe';
     } else if (type === 'hill') {
@@ -1601,7 +1649,7 @@ async function handleTrain(interaction) {
 async function handleMain(interaction) {
   const group = interaction.options.getSubcommandGroup();
   const sub   = interaction.options.getSubcommand();
-  const isStaffMember = interaction.member?.roles?.cache?.some(r => r.name === STAFF_ROLE);
+  const isStaffMember = interaction.member?.roles?.cache?.some(r => r.id === STAFF_ROLE_ID || r.name === STAFF_ROLE);
   if (group === 'reroll' && sub === 'gift') {
     if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
     const target = interaction.options.getUser('player');
@@ -1676,6 +1724,7 @@ const commands = [
         { name: 'Re-roll', value: 'reroll' },
         { name: 'Race Reroll', value: 'race_reroll' },
         { name: 'Race Safe', value: 'race_safe' },
+        { name: 'Reroll Trainer', value: 'trainer_reroll' },
         { name: 'Make a Debut', value: 'make_a_debut' },
         { name: 'Beyond the Dream', value: 'beyond_the_dream' },
         { name: 'The Road to Glory', value: 'the_road_to_glory' },
@@ -1698,7 +1747,7 @@ const commands = [
   new SlashCommandBuilder().setName('revoke').setDescription('[Staff] ลบ item')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
     .addUserOption(o => o.setName('user').setDescription('สมาชิก').setRequired(true))
-    .addStringOption(o => o.setName('item').setDescription('reroll').setRequired(true))
+    .addStringOption(o => o.setName('item').setDescription('item ที่จะลบ').setRequired(true).addChoices({name:'Re-roll',value:'reroll'},{name:'Race Reroll',value:'race_reroll'},{name:'Race Safe',value:'race_safe'},{name:'Reroll Trainer',value:'trainer_reroll'}))
     .addIntegerOption(o => o.setName('amount').setDescription('จำนวน').setRequired(true).setMinValue(1)),
 
   new SlashCommandBuilder().setName('inspect').setDescription('[Staff] ดู inventory สมาชิก')
@@ -1849,7 +1898,7 @@ async function handleSlash(interaction) {
   if (cmd === 'inventory') {
     await interaction.deferReply();
     const p = getPlayer(userId);
-    const buffer = await generateInventoryCard(p, username, 1);
+    const buffer = await generateInventoryCard(p, username, 1, interaction.member);
     const attachment = { attachment: buffer, name: 'inventory.png' };
     const embed = new EmbedBuilder().setColor(getBundleColor()).setImage('attachment://inventory.png');
     const row = new ActionRowBuilder().addComponents(
@@ -2274,6 +2323,8 @@ async function handleSlash(interaction) {
           updatePlayer(tid, { race_reroll: (tp.race_reroll ?? 1) + giftAmount });
         } else if (item === 'race_safe') {
           updatePlayer(tid, { race_safe: (tp.race_safe ?? 0) + giftAmount });
+        } else if (item === 'trainer_reroll') {
+          updatePlayer(tid, { trainer_reroll: (tp.trainer_reroll ?? 0) + giftAmount });
         } else if (ALL_BUNDLES[item]) {
           addBundle(tid, item);
         }
@@ -2283,7 +2334,7 @@ async function handleSlash(interaction) {
 
     const bundle = ALL_BUNDLES[item];
     const giftAmt = interaction.options.getInteger('amount') || 1;
-    const itemLabel = { reroll: `Re-roll x${giftAmt}`, race_reroll: `Race Reroll x${giftAmt}`, race_safe: `Race Safe x${giftAmt}` }[item] || (bundle ? bundle.name : item);
+    const itemLabel = { reroll: `Re-roll x${giftAmt}`, race_reroll: `Race Reroll x${giftAmt}`, race_safe: `Race Safe x${giftAmt}`, trainer_reroll: `Reroll Trainer x${giftAmt}` }[item] || (bundle ? bundle.name : item);
     return interaction.editReply({
       embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('[Staff] Gift')
         .setDescription(`แจก **${itemLabel}** ให้ ${successCount} คน เรียบร้อยแล้วครับ`)]
@@ -2314,10 +2365,17 @@ async function handleSlash(interaction) {
     const tp = getPlayer(target.id);
     if (item === 'reroll') {
       updatePlayer(target.id, { inv_reroll: Math.max(0, (tp.inv_reroll || 0) - amount) });
+    } else if (item === 'race_reroll') {
+      updatePlayer(target.id, { race_reroll: Math.max(0, (tp.race_reroll ?? 1) - amount) });
+    } else if (item === 'race_safe') {
+      updatePlayer(target.id, { race_safe: Math.max(0, (tp.race_safe ?? 0) - amount) });
+    } else if (item === 'trainer_reroll') {
+      updatePlayer(target.id, { trainer_reroll: Math.max(0, (tp.trainer_reroll ?? 0) - amount) });
     }
+    const itemLabel = { reroll: 'Re-roll', race_reroll: 'Race Reroll', race_safe: 'Race Safe', trainer_reroll: 'Reroll Trainer' }[item] || item;
     return interaction.reply({
       embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('[Staff] Revoke')
-        .setDescription(`ลบ **${item} x${amount}** จาก <@${target.id}> แล้วครับ`)]
+        .setDescription(`ลบ **${itemLabel} x${amount}** จาก <@${target.id}> แล้วครับ`)]
     });
   }
 
@@ -2332,7 +2390,7 @@ async function handleSlash(interaction) {
     const bar = Array.from({length:7}, (_,i) => i < tp.streak ? '⭐' : '☆').join(' ');
     const bundleList = owned.map(id => ALL_BUNDLES[id]?.name || id).join(', ') || 'ไม่มี';
 
-    const buffer = await generateInventoryCard(tp, target.username, 1);
+    const buffer = await generateInventoryCard(tp, target.username, 1, interaction.guild?.members?.cache?.get(target.id));
     const attachment = { attachment: buffer, name: 'inspect.png' };
     const embed = new EmbedBuilder().setColor(0xffa500)
       .setTitle(`[Staff] Inspect — ${target.username}`)
@@ -2444,7 +2502,7 @@ async function handleButton(interaction) {
     const page = id.startsWith('inv_p1_') ? 1 : 2;
     await interaction.deferUpdate();
     const p = getPlayer(userId);
-    const buffer = await generateInventoryCard(p, interaction.member?.displayName || interaction.user.username, page);
+    const buffer = await generateInventoryCard(p, interaction.member?.displayName || interaction.user.username, page, interaction.member);
     const attachment = { attachment: buffer, name: 'inventory.png' };
     const bundle = getBundle(p.equipped_bundle);
     const color = bundle ? parseInt(bundle.emblemColor.slice(1), 16) : 0x444444;
