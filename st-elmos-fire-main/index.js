@@ -644,7 +644,7 @@ async function generateInventoryCard(player, username, page = 1) {
   const bundleName = bundle ? bundle.name : 'Default';
   const isLight = false; // debut และ mejiro เปลี่ยนเป็น dark แล้ว
   const isSpecial = bundle ? bundle.isSpecial : false;
-  const H = page === 1 ? (isSpecial ? 365 : 340) : 280;
+  const H = page === 1 ? (isSpecial ? 420 : 395) : 280;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   const ec = hexToRgb(emblemColor);
@@ -783,18 +783,16 @@ async function generateInventoryCard(player, username, page = 1) {
       ctx.fill();
     }
 
-    // ── ITEMS ──
+    // ── ECONOMY ITEMS (3 กล่อง) ──
     const itemY = 196;
     const itemW = (W - 52) / 3;
-
     const ownedBundleCount = db.prepare('SELECT COUNT(*) as cnt FROM owned_bundles WHERE user_id = ?').get(player.user_id)?.cnt || 0;
-    const items = [
-      { icon: 'x', val: `${player.inv_reroll || 0}`, label: 'RE-ROLL' },
-      { icon: '*', val: `${ownedBundleCount}`, label: 'BUNDLES' },
-      { icon: '~', val: `${player.streak}/7`, label: 'STREAK' },
+    const ecoItems = [
+      { val: `${player.inv_reroll || 0}`, label: 'RE-ROLL' },
+      { val: `${ownedBundleCount}`,        label: 'BUNDLES' },
+      { val: `${player.streak}/7`,         label: 'STREAK'  },
     ];
-
-    items.forEach((item, i) => {
+    ecoItems.forEach((item, i) => {
       const ix = 20 + i * (itemW + 6);
       ctx.fillStyle = boxBg;
       drawRoundRect(ctx, ix, itemY, itemW, 46, 8);
@@ -802,14 +800,45 @@ async function generateInventoryCard(player, username, page = 1) {
       ctx.strokeStyle = boxBorder;
       ctx.lineWidth = 1;
       ctx.stroke();
-      ctx.font = `18px ${CANVAS_FONT}`;
-      ctx.fillText(item.icon, ix + 10, itemY + 30);
       ctx.font = `bold 16px ${CANVAS_FONT}`;
       ctx.fillStyle = textColor;
-      ctx.fillText(item.val, ix + 34, itemY + 26);
+      ctx.fillText(item.val, ix + 12, itemY + 28);
       ctx.font = `8px ${CANVAS_FONT}`;
       ctx.fillStyle = dimColor2;
-      ctx.fillText(item.label, ix + 34, itemY + 38);
+      ctx.fillText(item.label, ix + 12, itemY + 40);
+    });
+
+    // ── RACE DIVIDER ──
+    const raceDivY = itemY + 56;
+    ctx.fillStyle = `rgba(239,68,68,0.15)`;
+    ctx.fillRect(20, raceDivY, W - 40, 1);
+    ctx.font = `8px ${CANVAS_FONT}`;
+    ctx.fillStyle = 'rgba(239,68,68,0.5)';
+    ctx.textAlign = 'center';
+    ctx.fillText('RACE', W / 2, raceDivY - 4);
+    ctx.textAlign = 'left';
+
+    // ── RACE ITEMS (2 กล่อง) ──
+    const raceItemY = raceDivY + 10;
+    const raceItemW = (W - 52) / 2;
+    const raceItems = [
+      { val: `${player.race_reroll ?? 1}`, label: 'RACE REROLL', fillColor: 'rgba(239,68,68,0.08)', strokeColor: 'rgba(239,68,68,0.2)', valColor: '#F87171' },
+      { val: `${player.race_safe ?? 0}`,   label: 'RACE SAFE',   fillColor: 'rgba(59,130,246,0.08)', strokeColor: 'rgba(59,130,246,0.2)', valColor: '#60A5FA' },
+    ];
+    raceItems.forEach((item, i) => {
+      const ix = 20 + i * (raceItemW + 12);
+      ctx.fillStyle = item.fillColor;
+      drawRoundRect(ctx, ix, raceItemY, raceItemW, 46, 8);
+      ctx.fill();
+      ctx.strokeStyle = item.strokeColor;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.font = `bold 16px ${CANVAS_FONT}`;
+      ctx.fillStyle = item.valColor;
+      ctx.fillText(item.val, ix + 12, raceItemY + 28);
+      ctx.font = `8px ${CANVAS_FONT}`;
+      ctx.fillStyle = dimColor2;
+      ctx.fillText(item.label, ix + 12, raceItemY + 40);
     });
 
     // ── STREAK BOX (special bundles only) ──
@@ -860,7 +889,7 @@ async function generateInventoryCard(player, username, page = 1) {
     }
 
     // ── FOOTER ──
-    const footerY = isSpecial ? 308 : 252;
+    const footerY = isSpecial ? 363 : 307;
     ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.12)`;
     ctx.fillRect(20, footerY, W - 40, 1);
 
@@ -1229,12 +1258,20 @@ function roulPay(bet) { return ['red','black','odd','even','1-18','19-36'].inclu
 // ══════════════════════════════════════════════
 
 const TRAIN_CHANNEL_ID = '1498223895227138158';
-const RACE_CHANNEL_ID  = '1462831646523916380';
+const RACE_CHANNEL_IDS = {
+  tokyo:    '1462831563690737919',
+  nakayama: '1462831646523916380',
+  kyoto:    '1462831714782150677',
+  hanshin:  '1462834889509310552',
+  chukyo:   '1462834989002526730',
+};
 
 const TRACKS = {
   nakayama: { name: 'Nakayama Racecourse', hasHill: true, hillPhases: [3, 4], hillPenalty: { front: 40, end: 30, pace: 20, late: 20 } },
   tokyo:    { name: 'Tokyo Racecourse',    hasHill: false },
+  kyoto:    { name: 'Kyoto Racecourse',    hasHill: false },
   hanshin:  { name: 'Hanshin Racecourse',  hasHill: false },
+  chukyo:   { name: 'Chukyo Racecourse',   hasHill: false },
 };
 
 const DISTANCE_CONFIG = {
@@ -1318,7 +1355,7 @@ function getDiceNotation(style, phase, grade) {
 const raceCommands = [
   new SlashCommandBuilder().setName('race').setDescription('[Staff] จัดการระบบการแข่ง')
     .addSubcommand(s => s.setName('start').setDescription('[Staff] เปิด session')
-      .addStringOption(o => o.setName('track').setDescription('สนาม').setRequired(true).addChoices({name:'Nakayama',value:'nakayama'},{name:'Tokyo',value:'tokyo'},{name:'Hanshin',value:'hanshin'}))
+      .addStringOption(o => o.setName('track').setDescription('สนาม').setRequired(true).addChoices({name:'Nakayama',value:'nakayama'},{name:'Tokyo',value:'tokyo'},{name:'Kyoto',value:'kyoto'},{name:'Hanshin',value:'hanshin'},{name:'Chukyo',value:'chukyo'}))
       .addStringOption(o => o.setName('distance').setDescription('ระยะทาง').setRequired(true).addChoices({name:'Sprint (8T)',value:'sprint'},{name:'Mile/Medium (12T)',value:'mile_medium'},{name:'Long (14T)',value:'long'}))
       .addStringOption(o => o.setName('grade').setDescription('ระดับ').setRequired(true).addChoices({name:'Make Debut',value:'debut'},{name:'G3',value:'g3'},{name:'G2',value:'g2'},{name:'G1',value:'g1'})))
     .addSubcommand(s => s.setName('register').setDescription('ลงทะเบียนสายวิ่ง')
@@ -1503,7 +1540,8 @@ async function handleRace(interaction) {
     }
     clearRaceSession();
     try {
-      const ch = await interaction.client.channels.fetch(RACE_CHANNEL_ID);
+      const raceChId = RACE_CHANNEL_IDS[session.track] || RACE_CHANNEL_IDS.nakayama;
+      const ch = await interaction.client.channels.fetch(raceChId);
       if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle('🏁 จบการแข่ง!').setDescription(board || 'ไม่มีผู้เล่น')] });
     } catch(e) {}
     return interaction.reply({ content: '✅ จบการแข่งและล้าง session แล้วครับ', flags: 64 });
