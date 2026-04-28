@@ -1,4 +1,4 @@
-// index.js — St. Elmo's Fire v6.0
+// index.js — St. Elmo's Fire v7.0
 // Bundle system, Canvas cards, Profile system
 // CSPRNG: crypto.randomInt() | Storage: SQLite
 
@@ -1802,11 +1802,6 @@ async function handleMain(interaction) {
   }
 }
 
-      .setDescription('จัดการ reroll ติดตัว')
-      .addSubcommand(sub => sub
-        .setName('gift')
-        .setDescription('[Staff] บวก +1 reroll ติดตัวให้ผู้เล่น')
-        .addUserOption(o => o.setName('player').setDescription('ผู้เล่น').setRequired(true)))),
 ].map(c => c.toJSON());
 
 async function deployCommands() {
@@ -1830,7 +1825,7 @@ const client = new Client({
 // ตรวจสอบว่าเปิด Message Content Intent ใน Discord Developer Portal แล้ว
 
 client.once('clientReady', async () => {
-  console.log(`${BOTNAME} v6.0 online: ${client.user.tag}`);
+  console.log(`${BOTNAME} v7.0 online: ${client.user.tag}`);
   await deployCommands();
 });
 
@@ -2220,7 +2215,7 @@ async function handleSlash(interaction) {
   // /help
   if (cmd === 'help') {
     return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle("St. Elmo's Fire v6.0 — Help")
+      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle("St. Elmo's Fire v7.0 — Help")
         .addFields(
           { name: '🎲 ลูกเต๋า', value: '`!r 2d30` — ทอยด่วน\n`/roll expression` — ทอยผ่าน slash command\nรองรับ `kh` `kl` `advantage` `disadvantage`', inline: false },
           { name: '💰 เศรษฐกิจ', value: '`/daily` — รับรางวัลประจำวัน (รีเซ็ตตี 4)\n`/inventory` — ดูกระเป๋าสตางค์และไอเทม\n`/convert amount` — แลก 3 Gold = 1 RC\n`/use` — ใช้ Re-roll\n`/transfer @user amount` — โอน Gold ให้สมาชิก', inline: false },
@@ -2854,11 +2849,6 @@ const commands = [
     .setDescription('[Staff] จัดการ reroll ติดตัว')
     .addSubcommandGroup(group => group
       .setName('reroll')
-      .setDescription('จัดการ reroll ติดตัว')
-      .addSubcommand(sub => sub
-        .setName('gift')
-        .setDescription('[Staff] บวก +1 reroll ติดตัวให้ผู้เล่น')
-        .addUserOption(o => o.setName('player').setDescription('ผู้เล่น').setRequired(true)))),
 ].map(c => c.toJSON());
 
 async function deployCommands() {
@@ -2882,7 +2872,7 @@ const client = new Client({
 // ตรวจสอบว่าเปิด Message Content Intent ใน Discord Developer Portal แล้ว
 
 client.once('clientReady', async () => {
-  console.log(`${BOTNAME} v6.0 online: ${client.user.tag}`);
+  console.log(`${BOTNAME} v7.0 online: ${client.user.tag}`);
   await deployCommands();
 });
 
@@ -3272,7 +3262,7 @@ async function handleSlash(interaction) {
   // /help
   if (cmd === 'help') {
     return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle("St. Elmo's Fire v6.0 — Help")
+      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle("St. Elmo's Fire v7.0 — Help")
         .addFields(
           { name: '🎲 ลูกเต๋า', value: '`!r 2d30` — ทอยด่วน\n`/roll expression` — ทอยผ่าน slash command\nรองรับ `kh` `kl` `advantage` `disadvantage`', inline: false },
           { name: '💰 เศรษฐกิจ', value: '`/daily` — รับรางวัลประจำวัน (รีเซ็ตตี 4)\n`/inventory` — ดูกระเป๋าสตางค์และไอเทม\n`/convert amount` — แลก 3 Gold = 1 RC\n`/use` — ใช้ Re-roll\n`/transfer @user amount` — โอน Gold ให้สมาชิก', inline: false },
