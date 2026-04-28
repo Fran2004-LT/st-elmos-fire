@@ -1802,8 +1802,6 @@ async function handleMain(interaction) {
   }
 }
 
-].map(c => c.toJSON());
-
 async function deployCommands() {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
