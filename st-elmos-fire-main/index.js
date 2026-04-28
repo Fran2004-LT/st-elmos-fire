@@ -2716,30 +2716,6 @@ async function handleButton(interaction) {
 client.login(process.env.DISCORD_TOKEN);
 
 
-// ── Main Handler ──
-async function handleMain(interaction) {
-  const group = interaction.options.getSubcommandGroup();
-  const sub   = interaction.options.getSubcommand();
-  const isStaff = interaction.member?.roles?.cache?.some(r => r.name === STAFF_ROLE);
-
-  if (group === 'reroll' && sub === 'gift') {
-    if (!isStaff) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
-    const target = interaction.options.getUser('player');
-    const p = getPlayer(target.id);
-    const newMax = (p.race_reroll_max ?? 1) + 1;
-    updatePlayer(target.id, { race_reroll_max: newMax, race_reroll: (p.race_reroll ?? 1) + 1 });
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0xD4AF37)
-        .setTitle('🎁 แจก Reroll ติดตัวสำเร็จ!')
-        .addFields(
-          { name: '👤 ผู้เล่น', value: `<@${target.id}>`, inline: true },
-          { name: '🔄 Reroll ติดตัวใหม่', value: `${newMax} อัน`, inline: true },
-        )],
-    });
-  }
-}
-
 
 const commands = [
   new SlashCommandBuilder().setName('roll').setDescription('ทอยลูกเต๋า')
