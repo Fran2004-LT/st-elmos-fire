@@ -1224,1497 +1224,356 @@ function roulPay(bet) { return ['red','black','odd','even','1-18','19-36'].inclu
 // ══════════════════════════════════════════════
 //  SLASH COMMANDS
 // ══════════════════════════════════════════════
-const raceCommands = [
-  new SlashCommandBuilder()
-    .setName('race')
-    .setDescription('[Staff] จัดการระบบการแข่ง')
-    .addSubcommand(sub => sub
-      .setName('start')
-      .setDescription('[Staff] เปิด session การแข่ง')
-      .addStringOption(o => o.setName('track').setDescription('สนาม').setRequired(true)
-        .addChoices(
-          { name: 'Nakayama', value: 'nakayama' },
-          { name: 'Tokyo', value: 'tokyo' },
-          { name: 'Hanshin', value: 'osaka' },
-        ))
-      .addStringOption(o => o.setName('distance').setDescription('ระยะทาง').setRequired(true)
-        .addChoices(
-          { name: 'Sprint (8 turns)', value: 'sprint' },
-          { name: 'Mile/Medium (12 turns)', value: 'mile_medium' },
-          { name: 'Long (14 turns)', value: 'long' },
-        ))
-      .addStringOption(o => o.setName('grade').setDescription('ระดับการแข่ง').setRequired(true)
-        .addChoices(
-          { name: 'Make Debut', value: 'debut' },
-          { name: 'G3', value: 'g3' },
-          { name: 'G2', value: 'g2' },
-          { name: 'G1', value: 'g1' },
-        )))
-    .addSubcommand(sub => sub
-      .setName('register')
-      .setDescription('ลงทะเบียนสายการวิ่ง')
-      .addStringOption(o => o.setName('style').setDescription('สายการวิ่ง').setRequired(true)
-        .addChoices(
-          { name: 'Front', value: 'front' },
-          { name: 'Pace', value: 'pace' },
-          { name: 'Late', value: 'late' },
-          { name: 'End', value: 'end' },
-        )))
-    .addSubcommand(sub => sub
-      .setName('roll')
-      .setDescription('[Staff] ทอยลูกเต๋าให้ผู้เล่น')
-      .addUserOption(o => o.setName('player').setDescription('ผู้เล่น').setRequired(true)))
-    .addSubcommand(sub => sub
-      .setName('safe')
-      .setDescription('ใช้เซฟ (ทอยใหม่เมื่อได้หลักหน่วย)'))
-    .addSubcommand(sub => sub
-      .setName('reroll')
-      .setDescription('ใช้ reroll ทอยใหม่')
-      .addStringOption(o => o.setName('type').setDescription('ประเภท reroll').setRequired(true)
-        .addChoices(
-          { name: 'Reroll ติดตัว', value: 'personal' },
-          { name: 'Reroll กิจกรรม', value: 'activity' },
-          { name: 'Reroll เทรนเนอร์', value: 'trainer' },
-        )))
-    .addSubcommand(sub => sub
-      .setName('debuffskill')
-      .setDescription('ใช้ Debuff Skill บังคับเป้าหมายทอยใหม่')
-      .addUserOption(o => o.setName('target').setDescription('เป้าหมาย').setRequired(true)))
-    .addSubcommand(sub => sub
-      .setName('slowdown')
-      .setDescription('ลดความเร็ว (ลดแต้มตัวเอง)'))
-    .addSubcommand(sub => sub
-      .setName('allout')
-      .setDescription('All out — ทอยใหม่ แต่หักแต้มสะสม'))
-    .addSubcommand(sub => sub
-      .setName('zone')
-      .setDescription('เปิดโซน — เลือกทอยทองหรือขาว (G1 เท่านั้น)')
-      .addStringOption(o => o.setName('color').setDescription('ทองหรือขาว').setRequired(true)
-        .addChoices(
-          { name: 'ทอง', value: 'gold' },
-          { name: 'ขาว', value: 'white' },
-        )))
-    .addSubcommand(sub => sub
-      .setName('endturn')
-      .setDescription('[Staff] จบเทิร์นปัจจุบัน'))
-    .addSubcommand(sub => sub
-      .setName('endphase')
-      .setDescription('[Staff] จบเฟสปัจจุบัน'))
-    .addSubcommand(sub => sub
-      .setName('end')
-      .setDescription('[Staff] จบการแข่งและล้าง session')),
+// ══════════════════════════════════════════════
+//  RACE SYSTEM v7.0
+// ══════════════════════════════════════════════
 
-  // Train commands
-  new SlashCommandBuilder()
-    .setName('train')
-    .setDescription('ระบบฝึกซ้อม')
-    .addSubcommand(sub => sub
-      .setName('submit')
-      .setDescription('ส่งบทฝึกซ้อมให้ Staff พิจารณา')
+const TRAIN_CHANNEL_ID = '1498223895227138158';
+const RACE_CHANNEL_ID  = '1462831646523916380';
+
+const TRACKS = {
+  nakayama: { name: 'Nakayama Racecourse', hasHill: true, hillPhases: [3, 4], hillPenalty: { front: 40, end: 30, pace: 20, late: 20 } },
+  tokyo:    { name: 'Tokyo Racecourse',    hasHill: false },
+  hanshin:  { name: 'Hanshin Racecourse',  hasHill: false },
+};
+
+const DISTANCE_CONFIG = {
+  sprint:      { label: 'Sprint (8 turns)',      turnsPerPhase: [2, 2, 2, 2] },
+  mile_medium: { label: 'Mile/Medium (12 turns)', turnsPerPhase: [3, 3, 3, 3] },
+  long:        { label: 'Long (14 turns)',        turnsPerPhase: [3, 4, 3, 4] },
+};
+
+const RACE_GRADES = {
+  debut: { label: 'Make Debut', safes: 3 },
+  g3:    { label: 'G3',         safes: 2 },
+  g2:    { label: 'G2',         safes: 1 },
+  g1:    { label: 'G1',         safes: 0 },
+};
+
+function getAllOutInjury(count) {
+  if (count <= 3) return 'เหยียบก้อนกรวด เจ็บนิดหน่อย';
+  if (count <= 5) return 'ข้อเท้าแพลง';
+  if (count <= 6) return 'บาดเจ็บเล็กน้อย';
+  if (count <= 8) return 'อาจต้องพักและเข้าพบแพทย์';
+  return 'เสี่ยงบาดเจ็บหนัก!';
+}
+
+const raceDb = new Database(':memory:');
+raceDb.exec(`
+  CREATE TABLE IF NOT EXISTS race_session (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    track TEXT DEFAULT '', distance TEXT DEFAULT '', grade TEXT DEFAULT '',
+    current_phase INTEGER DEFAULT 1, current_turn INTEGER DEFAULT 1, active INTEGER DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS race_players (
+    user_id TEXT PRIMARY KEY, username TEXT DEFAULT '', run_style TEXT DEFAULT '',
+    score INTEGER DEFAULT 0, race_safes INTEGER DEFAULT 0, one_use_safes INTEGER DEFAULT 0,
+    reroll_count INTEGER DEFAULT 0, all_out_count INTEGER DEFAULT 0, hill_debuff INTEGER DEFAULT 0,
+    last_roll TEXT DEFAULT '', zone_active INTEGER DEFAULT 0
+  );
+  INSERT OR IGNORE INTO race_session (id, active) VALUES (1, 0);
+`);
+
+function getRaceSession() { return raceDb.prepare('SELECT * FROM race_session WHERE id = 1').get(); }
+function getRacePlayer(userId) { return raceDb.prepare('SELECT * FROM race_players WHERE user_id = ?').get(userId); }
+function getAllRacePlayers() { return raceDb.prepare('SELECT * FROM race_players ORDER BY score DESC').all(); }
+function updateRacePlayer(userId, data) {
+  const keys = Object.keys(data).map(k => `${k} = ?`).join(', ');
+  raceDb.prepare(`UPDATE race_players SET ${keys} WHERE user_id = ?`).run(...Object.values(data), userId);
+}
+function updateRaceSession(data) {
+  const keys = Object.keys(data).map(k => `${k} = ?`).join(', ');
+  raceDb.prepare(`UPDATE race_session SET ${keys} WHERE id = 1`).run(...Object.values(data));
+}
+function clearRaceSession() {
+  raceDb.exec(`DELETE FROM race_players; UPDATE race_session SET active=0, current_phase=1, current_turn=1, track='', distance='', grade='';`);
+}
+
+function rollDiceNotation(notation) {
+  const m = notation.toLowerCase().match(/^(\d+)d(\d+)(?:(kh|kl)(\d+))?$/);
+  if (!m) return null;
+  const [, n, sides, mode, keep] = m;
+  const num = parseInt(n), s = parseInt(sides), k = keep ? parseInt(keep) : num;
+  const rolls = Array.from({ length: num }, () => Math.floor(Math.random() * s) + 1);
+  let chosen, rest;
+  if (mode === 'kh') { const sorted = [...rolls].sort((a,b) => b-a); chosen = sorted.slice(0,k); rest = sorted.slice(k); }
+  else if (mode === 'kl') { const sorted = [...rolls].sort((a,b) => a-b); chosen = sorted.slice(0,k); rest = sorted.slice(k); }
+  else { chosen = rolls; rest = []; }
+  const total = chosen.reduce((a,b) => a+b, 0);
+  const display = rest.length ? `${total} [${rest.join(', ')}]` : `${total}`;
+  return { total, chosen, rest, display, notation };
+}
+
+function canUseSafe(rollResult) {
+  const units = rollResult.total % 10;
+  return units >= 1 && units <= 9 && rollResult.rest.length === 0;
+}
+
+function getDiceNotation(style, phase, grade) {
+  const upper = { front: ['d30','3d30','4d30','2d30'], pace: ['d30','2d30','2d30','2d30'], late: ['d30','2d30','3d30','2d30'], end: ['d30','2d30','6d30','d30'] };
+  const lower = { front: ['2d30','4d30','3d30','d30'], pace: ['3d30kh1','6d30kh2','6d30kh2','6d30kh3'], late: ['2d30kh1','4d30kh2','9d30kh3','3d30'], end: ['d30','d30','5d30','d30'] };
+  return (grade === 'g1' ? lower : upper)[style]?.[phase - 1] || 'd30';
+}
+
+const raceCommands = [
+  new SlashCommandBuilder().setName('race').setDescription('[Staff] จัดการระบบการแข่ง')
+    .addSubcommand(s => s.setName('start').setDescription('[Staff] เปิด session')
+      .addStringOption(o => o.setName('track').setDescription('สนาม').setRequired(true).addChoices({name:'Nakayama',value:'nakayama'},{name:'Tokyo',value:'tokyo'},{name:'Hanshin',value:'hanshin'}))
+      .addStringOption(o => o.setName('distance').setDescription('ระยะทาง').setRequired(true).addChoices({name:'Sprint (8T)',value:'sprint'},{name:'Mile/Medium (12T)',value:'mile_medium'},{name:'Long (14T)',value:'long'}))
+      .addStringOption(o => o.setName('grade').setDescription('ระดับ').setRequired(true).addChoices({name:'Make Debut',value:'debut'},{name:'G3',value:'g3'},{name:'G2',value:'g2'},{name:'G1',value:'g1'})))
+    .addSubcommand(s => s.setName('register').setDescription('ลงทะเบียนสายวิ่ง')
+      .addStringOption(o => o.setName('style').setDescription('สาย').setRequired(true).addChoices({name:'Front',value:'front'},{name:'Pace',value:'pace'},{name:'Late',value:'late'},{name:'End',value:'end'})))
+    .addSubcommand(s => s.setName('roll').setDescription('[Staff] ทอยให้ผู้เล่น').addUserOption(o => o.setName('player').setDescription('ผู้เล่น').setRequired(true)))
+    .addSubcommand(s => s.setName('safe').setDescription('ใช้ Safe'))
+    .addSubcommand(s => s.setName('reroll').setDescription('ใช้ Reroll').addStringOption(o => o.setName('type').setDescription('ประเภท').setRequired(true).addChoices({name:'Reroll ติดตัว',value:'personal'},{name:'Reroll กิจกรรม',value:'activity'},{name:'Reroll เทรนเนอร์',value:'trainer'})))
+    .addSubcommand(s => s.setName('debuffskill').setDescription('ใช้ Debuff Skill').addUserOption(o => o.setName('target').setDescription('เป้าหมาย').setRequired(true)))
+    .addSubcommand(s => s.setName('slowdown').setDescription('ลดความเร็ว'))
+    .addSubcommand(s => s.setName('allout').setDescription('All out — หัก 10 แต้มทบ'))
+    .addSubcommand(s => s.setName('zone').setDescription('เปิดโซน (G1 เท่านั้น)').addStringOption(o => o.setName('color').setDescription('ทองหรือขาว').setRequired(true).addChoices({name:'ทอง',value:'gold'},{name:'ขาว',value:'white'})))
+    .addSubcommand(s => s.setName('endturn').setDescription('[Staff] จบเทิร์น'))
+    .addSubcommand(s => s.setName('endphase').setDescription('[Staff] จบเฟส'))
+    .addSubcommand(s => s.setName('end').setDescription('[Staff] จบการแข่ง')),
+
+  new SlashCommandBuilder().setName('train').setDescription('ระบบฝึกซ้อม')
+    .addSubcommand(s => s.setName('submit').setDescription('ส่งบทฝึก')
+      .addUserOption(o => o.setName('trainer').setDescription('เทรนเนอร์').setRequired(true))
+      .addStringOption(o => o.setName('horses').setDescription('mention สาวม้า (@ม้าA @ม้าB)').setRequired(true))
+      .addStringOption(o => o.setName('type').setDescription('ประเภท').setRequired(true).addChoices({name:'Reroll (คุยสนทนา)',value:'chat'},{name:'Reroll (ฝึกคู่/กลุ่ม)',value:'group'},{name:'Safe (ฝึกคนเดียว)',value:'solo'},{name:'Zone (ฝึกโซน)',value:'zone'},{name:'ล้างเนินมรณะ',value:'hill'}))
+      .addChannelOption(o => o.setName('location').setDescription('channel ที่ฝึก').setRequired(true)))
+    .addSubcommand(s => s.setName('approve').setDescription('[Staff] อนุมัติบทฝึก')
       .addUserOption(o => o.setName('horse').setDescription('สาวม้า').setRequired(true))
-      .addStringOption(o => o.setName('type').setDescription('ประเภทการฝึก').setRequired(true)
-        .addChoices(
-          { name: 'คุยสนทนา (3 บรรทัด+)', value: 'chat' },
-          { name: 'ฝึกคู่/กลุ่ม', value: 'group' },
-          { name: 'ฝึกคนเดียว', value: 'solo' },
-          { name: 'ฝึกล้างเนินมรณะ (2 บท+)', value: 'hill' },
-        ))
-      .addStringOption(o => o.setName('link').setDescription('ลิงก์บทฝึก').setRequired(true)))
-    .addSubcommand(sub => sub
-      .setName('approve')
-      .setDescription('[Staff] อนุมัติบทฝึก')
-      .addUserOption(o => o.setName('horse').setDescription('สาวม้า').setRequired(true))
-      .addStringOption(o => o.setName('type').setDescription('ประเภทการฝึก').setRequired(true)
-        .addChoices(
-          { name: 'คุยสนทนา (3 บรรทัด+)', value: 'chat' },
-          { name: 'ฝึกคู่/กลุ่ม', value: 'group' },
-          { name: 'ฝึกคนเดียว', value: 'solo' },
-          { name: 'ล้างเนินมรณะ', value: 'hill' },
-        ))
-      .addUserOption(o => o.setName('trainer').setDescription('เทรนเนอร์ (ถ้ามี)'))),
+      .addStringOption(o => o.setName('type').setDescription('ประเภท').setRequired(true).addChoices({name:'คุยสนทนา',value:'chat'},{name:'ฝึกคู่/กลุ่ม',value:'group'},{name:'ฝึกคนเดียว',value:'solo'},{name:'ล้างเนินมรณะ',value:'hill'}))
+      .addUserOption(o => o.setName('trainer').setDescription('เทรนเนอร์').setRequired(false))),
 ];
 
-// ── Race Handler ──
 async function handleRace(interaction) {
   const sub = interaction.options.getSubcommand();
   const userId = interaction.user.id;
-  const isStaff = interaction.member?.roles?.cache?.some(r => r.name === STAFF_ROLE);
+  const isStaffMember = interaction.member?.roles?.cache?.some(r => r.name === STAFF_ROLE);
   const session = getRaceSession();
 
-  // ── /race start ──
   if (sub === 'start') {
-    if (!isStaff) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
-    if (session.active) return interaction.reply({ content: 'มี session กำลังดำเนินอยู่แล้วครับ ใช้ /race end ก่อน', flags: 64 });
-
-    const track    = interaction.options.getString('track');
+    if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
+    if (session.active) return interaction.reply({ content: 'มี session อยู่แล้วครับ ใช้ /race end ก่อน', flags: 64 });
+    const track = interaction.options.getString('track');
     const distance = interaction.options.getString('distance');
-    const grade    = interaction.options.getString('grade');
-    const distCfg  = DISTANCE_CONFIG[distance];
-    const gradeInfo = RACE_GRADES[grade];
-    const trackInfo = TRACKS[track];
-
+    const grade = interaction.options.getString('grade');
     updateRaceSession({ active: 1, track, distance, grade, current_phase: 1, current_turn: 1 });
-
-    const embed = new EmbedBuilder()
-      .setColor(0xD4AF37)
-      .setTitle('🏇 เปิด Session การแข่งแล้ว!')
+    const t = TRACKS[track], d = DISTANCE_CONFIG[distance], g = RACE_GRADES[grade];
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle('🏇 เปิด Session การแข่งแล้ว!')
       .addFields(
-        { name: '🏟️ สนาม', value: trackInfo.name, inline: true },
-        { name: '📏 ระยะ', value: distCfg.label, inline: true },
-        { name: '🏆 ระดับ', value: gradeInfo.label, inline: true },
-        { name: '📊 โครงสร้าง', value: distCfg.turnsPerPhase.map((t, i) => `เฟส ${i+1}: ${t} เทิร์น`).join('\n'), inline: false },
-        { name: '🛡️ Race Safe', value: `${gradeInfo.safes} อัน/คน`, inline: true },
-        { name: '⛰️ เนินมรณะ', value: trackInfo.hasHill ? '✅ มี' : '❌ ไม่มี', inline: true },
-      )
-      .setFooter({ text: 'ผู้เล่นใช้ /race register เพื่อลงทะเบียนสายการวิ่ง' });
-
-    return interaction.reply({ embeds: [embed] });
+        { name: '🏟️ สนาม', value: t.name, inline: true },
+        { name: '📏 ระยะ', value: d.label, inline: true },
+        { name: '🏆 ระดับ', value: g.label, inline: true },
+        { name: '📊 โครงสร้าง', value: d.turnsPerPhase.map((n,i) => `เฟส ${i+1}: ${n} เทิร์น`).join('\n') },
+        { name: '🛡️ Race Safe', value: `${g.safes} อัน/คน`, inline: true },
+        { name: '⛰️ เนินมรณะ', value: t.hasHill ? '✅ มี' : '❌ ไม่มี', inline: true },
+      ).setFooter({ text: 'ผู้เล่นใช้ /race register เพื่อลงทะเบียน' })] });
   }
 
-  // ── /race register ──
   if (sub === 'register') {
-    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session การแข่งครับ', flags: 64 });
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const style = interaction.options.getString('style');
-    const gradeInfo = RACE_GRADES[session.grade];
+    const g = RACE_GRADES[session.grade];
     const existing = getRacePlayer(userId);
-
-    if (existing) {
-      updateRacePlayer(userId, { run_style: style });
-    } else {
-      raceDb.prepare(`
-        INSERT INTO race_players (user_id, username, run_style, race_safes)
-        VALUES (?, ?, ?, ?)
-      `).run(userId, interaction.user.username, style, gradeInfo.safes);
-    }
-
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0x57f287)
-        .setDescription(`✅ **${interaction.user.username}** ลงทะเบียนสาย **${style.toUpperCase()}** เรียบร้อยครับ`)],
-      flags: 64,
-    });
+    if (existing) { updateRacePlayer(userId, { run_style: style }); }
+    else { raceDb.prepare('INSERT INTO race_players (user_id, username, run_style, race_safes) VALUES (?,?,?,?)').run(userId, interaction.user.username, style, g.safes); }
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setDescription(`✅ **${interaction.user.username}** ลงทะเบียนสาย **${style.toUpperCase()}** แล้วครับ`)], flags: 64 });
   }
 
-  // ── /race roll ──
   if (sub === 'roll') {
-    if (!isStaff) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
-    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session การแข่งครับ', flags: 64 });
-
+    if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const target = interaction.options.getUser('player');
     const player = getRacePlayer(target.id);
-    if (!player) return interaction.reply({ content: 'ผู้เล่นคนนี้ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
-
-    const distCfg = DISTANCE_CONFIG[session.distance];
-    const phase = session.current_phase;
-    const style = player.run_style;
-
-    // ดึง dice notation จากตาราง v3.0
-    const diceTable = getDiceNotation(style, phase, session.grade);
-    const result = rollDiceNotation(diceTable);
-    if (!result) return interaction.reply({ content: `❌ Dice notation ผิดพลาด: ${diceTable}`, flags: 64 });
-
-    // เช็ค Hill Debuff
-    const hillPenalty = applyHillDebuff(session, player);
-    if (hillPenalty > 0 && !player.hill_debuff) {
-      updateRacePlayer(target.id, { hill_debuff: 1 });
+    if (!player) return interaction.reply({ content: 'ผู้เล่นยังไม่ได้ลงทะเบียนครับ', flags: 64 });
+    const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
+    const result = rollDiceNotation(notation);
+    const track = TRACKS[session.track];
+    let hillMsg = '';
+    if (track?.hasHill && track.hillPhases.includes(session.current_phase) && !player.hill_debuff) {
+      const penalty = track.hillPenalty[player.run_style] || 0;
+      updateRacePlayer(target.id, { hill_debuff: 1, score: player.score - penalty });
+      hillMsg = `\n⛰️ **เนินมรณะ** หัก -${penalty} แต้ม`;
     }
-
-    // บันทึก roll
-    raceDb.prepare(`
-      INSERT INTO race_rolls (user_id, phase, turn, roll_raw, roll_final)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(target.id, phase, session.current_turn, diceTable, result.total);
-
     updateRacePlayer(target.id, { last_roll: JSON.stringify(result) });
-
     const canSafe = canUseSafe(result);
-    const embed = new EmbedBuilder()
-      .setColor(0xD4AF37)
-      .setTitle(`🎲 ${target.username} — เฟส ${phase} เทิร์น ${session.current_turn}`)
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37)
+      .setTitle(`🎲 ${target.username} — เฟส ${session.current_phase} เทิร์น ${session.current_turn}`)
       .addFields(
-        { name: '🎯 Dice', value: `\`${diceTable}\``, inline: true },
-        { name: '📊 ผล', value: `**${result.display}**`, inline: true },
-        { name: '🏃 สาย', value: style.toUpperCase(), inline: true },
-      );
-
-    if (hillPenalty > 0) {
-      embed.addFields({ name: '⛰️ เนินมรณะ', value: `-${hillPenalty} แต้ม (เฟส ${phase})`, inline: false });
-    }
-    if (canSafe) {
-      embed.addFields({ name: '🛡️ เซฟ', value: 'ใช้ได้ (หลักหน่วย)', inline: true });
-    }
-    embed.addFields(
-      { name: '🛡️ Race Safe', value: `${player.race_safes} อัน`, inline: true },
-      { name: '🎟️ One-use Safe', value: `${player.one_use_safes} อัน`, inline: true },
-    );
-
-    return interaction.reply({ embeds: [embed] });
+        { name: '🎯 Dice', value: `\`${notation}\``, inline: true },
+        { name: '📊 ผล', value: `**${result.display}**${hillMsg}`, inline: true },
+        { name: '🏃 สาย', value: player.run_style.toUpperCase(), inline: true },
+        { name: '🛡️ Safe', value: canSafe ? `ใช้ได้ | Race: ${player.race_safes} | One-use: ${player.one_use_safes}` : 'ใช้ไม่ได้ (KH/KL หรือหลักหน่วย 0)', inline: false },
+      )] });
   }
 
-  // ── /race safe ──
   if (sub === 'safe') {
-    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session การแข่งครับ', flags: 64 });
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const player = getRacePlayer(userId);
-    if (!player) return interaction.reply({ content: 'คุณยังไม่ได้ลงทะเบียนครับ', flags: 64 });
-
+    if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
     const lastRoll = player.last_roll ? JSON.parse(player.last_roll) : null;
     if (!lastRoll) return interaction.reply({ content: 'ยังไม่มีผลทอยครับ', flags: 64 });
-    if (!canUseSafe(lastRoll)) return interaction.reply({ content: '❌ ใช้เซฟไม่ได้ — หลักหน่วยอยู่ในวงเล็บ (KH/KL)', flags: 64 });
-
-    // เช็คว่ามีเซฟไหม
-    const hasRaceSafe = player.race_safes > 0;
-    const hasOneSafe = player.one_use_safes > 0;
-    if (!hasRaceSafe && !hasOneSafe) return interaction.reply({ content: '❌ ไม่มีเซฟเหลือแล้วครับ', flags: 64 });
-
-    // ใช้ one-use safe ก่อน ถ้าไม่มีค่อยใช้ race safe
-    if (hasOneSafe) {
-      updateRacePlayer(userId, { one_use_safes: player.one_use_safes - 1 });
-    } else {
-      updateRacePlayer(userId, { race_safes: player.race_safes - 1 });
-    }
-
-    // ทอยใหม่
-    const distCfg = DISTANCE_CONFIG[session.distance];
-    const diceTable = getDiceNotation(player.run_style, session.current_phase, session.grade);
-    const newResult = rollDiceNotation(diceTable);
+    if (!canUseSafe(lastRoll)) return interaction.reply({ content: '❌ ใช้ Safe ไม่ได้ — หลักหน่วยอยู่ในวงเล็บ (KH/KL) หรือเป็น 0', flags: 64 });
+    if (player.one_use_safes < 1 && player.race_safes < 1) return interaction.reply({ content: '❌ ไม่มี Safe เหลือครับ', flags: 64 });
+    if (player.one_use_safes > 0) { updateRacePlayer(userId, { one_use_safes: player.one_use_safes - 1 }); }
+    else { updateRacePlayer(userId, { race_safes: player.race_safes - 1 }); }
+    const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
+    const newResult = rollDiceNotation(notation);
     updateRacePlayer(userId, { last_roll: JSON.stringify(newResult) });
-
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0x57f287)
-        .setTitle(`🛡️ ${interaction.user.username} ใช้เซฟ!`)
-        .addFields(
-          { name: '📊 ผลเดิม', value: `~~${lastRoll.display}~~`, inline: true },
-          { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true },
-          { name: '🛡️ Race Safe เหลือ', value: `${hasOneSafe ? player.race_safes : player.race_safes - 1} อัน`, inline: true },
-        )],
-    });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle(`🛡️ ${interaction.user.username} ใช้ Safe!`)
+      .addFields({ name: '📊 ผลเดิม', value: `~~${lastRoll.display}~~`, inline: true }, { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true })] });
   }
 
-  // ── /race allout ──
   if (sub === 'allout') {
-    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session การแข่งครับ', flags: 64 });
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const player = getRacePlayer(userId);
-    if (!player) return interaction.reply({ content: 'คุณยังไม่ได้ลงทะเบียนครับ', flags: 64 });
-
+    if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
     const count = player.all_out_count + 1;
     const penalty = count * 10;
-    const injury = getAllOutInjury(count);
-
-    const diceTable = getDiceNotation(player.run_style, session.current_phase, session.grade);
-    const newResult = rollDiceNotation(diceTable);
-    updateRacePlayer(userId, {
-      all_out_count: count,
-      score: player.score - penalty,
-      last_roll: JSON.stringify(newResult),
-    });
-
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0xEB5757)
-        .setTitle(`💥 ${interaction.user.username} — All Out! (ครั้งที่ ${count})`)
-        .addFields(
-          { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true },
-          { name: '💔 หักแต้ม', value: `-${penalty} แต้ม`, inline: true },
-          { name: '🤕 อาการ', value: injury, inline: false },
-        )],
-    });
+    const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
+    const newResult = rollDiceNotation(notation);
+    updateRacePlayer(userId, { all_out_count: count, score: player.score - penalty, last_roll: JSON.stringify(newResult) });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757).setTitle(`💥 ${interaction.user.username} — All Out! (ครั้งที่ ${count})`)
+      .addFields({ name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true }, { name: '💔 หักแต้ม', value: `-${penalty} แต้ม`, inline: true }, { name: '🤕 อาการ', value: getAllOutInjury(count) })] });
   }
 
-  // ── /race debuffskill ──
   if (sub === 'debuffskill') {
-    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session การแข่งครับ', flags: 64 });
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const player = getRacePlayer(userId);
-    if (!player) return interaction.reply({ content: 'คุณยังไม่ได้ลงทะเบียนครับ', flags: 64 });
-
-    // เช็ค reroll ติดตัวที่แปลงเป็น debuff skill
-    const mainPlayer = getPlayer(userId);
-    if (!mainPlayer || mainPlayer.inv_reroll < 1) {
-      return interaction.reply({ content: '❌ ไม่มี Debuff Skill ครับ', flags: 64 });
-    }
-
+    if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
+    const mp = getPlayer(userId);
+    if (!mp || (mp.race_reroll ?? 1) < 1) return interaction.reply({ content: '❌ ไม่มี Reroll ติดตัวครับ', flags: 64 });
     const target = interaction.options.getUser('target');
-    const targetPlayer = getRacePlayer(target.id);
-    if (!targetPlayer) return interaction.reply({ content: 'ผู้เล่นคนนี้ไม่ได้ลงทะเบียนครับ', flags: 64 });
-
-    // หัก reroll ของผู้ใช้
-    updatePlayer(userId, { inv_reroll: mainPlayer.inv_reroll - 1 });
-
-    // บังคับ target ทอยใหม่
-    const diceTable = getDiceNotation(targetPlayer.run_style, session.current_phase, session.grade);
-    const newResult = rollDiceNotation(diceTable);
-    const oldResult = targetPlayer.last_roll ? JSON.parse(targetPlayer.last_roll) : null;
+    const tp = getRacePlayer(target.id);
+    if (!tp) return interaction.reply({ content: 'ผู้เล่นคนนี้ไม่ได้ลงทะเบียนครับ', flags: 64 });
+    updatePlayer(userId, { race_reroll: (mp.race_reroll ?? 1) - 1 });
+    const notation = getDiceNotation(tp.run_style, session.current_phase, session.grade);
+    const newResult = rollDiceNotation(notation);
+    const old = tp.last_roll ? JSON.parse(tp.last_roll) : null;
     updateRacePlayer(target.id, { last_roll: JSON.stringify(newResult) });
-
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0xEB5757)
-        .setTitle(`⚡ Debuff Skill!`)
-        .setDescription(`**${interaction.user.username}** ใช้ Debuff Skill กับ **${target.username}**!`)
-        .addFields(
-          { name: '📊 ผลเดิม', value: oldResult ? `~~${oldResult.display}~~` : '—', inline: true },
-          { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true },
-          { name: '💡 หมายเหตุ', value: `${target.username} สามารถเลือกได้ว่าจะเอาผลไหน (ถ้าอยู่ในโซน)`, inline: false },
-        )],
-    });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757).setTitle('⚡ Debuff Skill!')
+      .setDescription(`**${interaction.user.username}** ใช้ Debuff Skill กับ **${target.username}**!`)
+      .addFields({ name: '📊 ผลเดิม', value: old ? `~~${old.display}~~` : '—', inline: true }, { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true })] });
   }
 
-  // ── /race endturn ──
+  if (sub === 'zone') {
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
+    if (session.grade !== 'g1') return interaction.reply({ content: '❌ Zone ใช้ได้เฉพาะ G1 ครับ', flags: 64 });
+    const player = getRacePlayer(userId);
+    if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
+    const color = interaction.options.getString('color');
+    updateRacePlayer(userId, { zone_active: 1 });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(color === 'gold' ? 0xD4AF37 : 0xffffff)
+      .setTitle(`✨ ${interaction.user.username} เปิดโซน!`)
+      .setDescription(`เลือกทอย **${color === 'gold' ? 'ทอง 🟡' : 'ขาว ⚪'}** — สามารถเลือกผลลัพธ์ไหนก็ได้ครับ`)] });
+  }
+
   if (sub === 'endturn') {
-    if (!isStaff) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
-    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session การแข่งครับ', flags: 64 });
-
-    const distCfg = DISTANCE_CONFIG[session.distance];
-    const turnsInPhase = distCfg.turnsPerPhase[session.current_phase - 1];
-    const nextTurn = session.current_turn + 1;
-
-    updateRaceSession({ current_turn: nextTurn });
-
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0xD4AF37)
-        .setDescription(`✅ จบเทิร์น ${session.current_turn} — เริ่มเทิร์น **${nextTurn}** (เฟส ${session.current_phase}/${turnsInPhase} เทิร์น)`)],
-    });
+    if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
+    updateRaceSession({ current_turn: session.current_turn + 1 });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setDescription(`✅ จบเทิร์น ${session.current_turn} → เทิร์น **${session.current_turn + 1}**`)] });
   }
 
-  // ── /race endphase ──
   if (sub === 'endphase') {
-    if (!isStaff) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
-    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session การแข่งครับ', flags: 64 });
-
-    const nextPhase = session.current_phase + 1;
-
-    // เฟส 1 จบ → บวก 5 แต้มให้คนท้ายสุด
+    if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     let bonusMsg = '';
     if (session.current_phase === 1) {
       const players = getAllRacePlayers();
       if (players.length > 0) {
         const last = players[players.length - 1];
         updateRacePlayer(last.user_id, { score: last.score + 5 });
-        bonusMsg = `\n⭐ **${last.username}** ได้รับ +5 แต้ม (อยู่รั้งท้ายสุดจบเฟส 1)`;
+        bonusMsg = `\n⭐ **${last.username}** ได้รับ +5 แต้ม`;
       }
     }
-
-    updateRaceSession({ current_phase: nextPhase, current_turn: 1 });
-
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0xD4AF37)
-        .setTitle(`✅ จบเฟส ${session.current_phase}`)
-        .setDescription(`เริ่มเฟส **${nextPhase}**${bonusMsg}`)],
-    });
+    updateRaceSession({ current_phase: session.current_phase + 1, current_turn: 1 });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle(`✅ จบเฟส ${session.current_phase}`).setDescription(`เริ่มเฟส **${session.current_phase + 1}**${bonusMsg}`)] });
   }
 
-  // ── /race end ──
   if (sub === 'end') {
-    if (!isStaff) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
-    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session การแข่งครับ', flags: 64 });
-
+    if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const players = getAllRacePlayers();
-    const board = players.map((p, i) => `${i + 1}. **${p.username}** (${p.run_style.toUpperCase()}) — ${p.score} แต้ม`).join('\n');
-
-    // Restock race_reroll ให้ทุกคนหลัง race end
-    const allPlayers = getAllRacePlayers();
-    for (const rp of allPlayers) {
+    const board = players.map((p,i) => `${i+1}. **${p.username}** (${p.run_style.toUpperCase()}) — ${p.score} แต้ม`).join('\n');
+    for (const rp of players) {
       const mp = getPlayer(rp.user_id);
       if (mp) updatePlayer(rp.user_id, { race_reroll: mp.race_reroll_max ?? 1 });
     }
-
     clearRaceSession();
-
-    const raceChannel = await interaction.client.channels.fetch(RACE_CHANNEL_ID);
-    if (raceChannel) {
-      await raceChannel.send({
-        embeds: [new EmbedBuilder()
-          .setColor(0xD4AF37)
-          .setTitle('🏁 จบการแข่ง!')
-          .setDescription(board || 'ไม่มีผู้เล่น')],
-      });
-    }
-
+    try {
+      const ch = await interaction.client.channels.fetch(RACE_CHANNEL_ID);
+      if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle('🏁 จบการแข่ง!').setDescription(board || 'ไม่มีผู้เล่น')] });
+    } catch(e) {}
     return interaction.reply({ content: '✅ จบการแข่งและล้าง session แล้วครับ', flags: 64 });
   }
-
-  // ── /race zone ──
-  if (sub === 'zone') {
-    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session การแข่งครับ', flags: 64 });
-    if (session.grade !== 'g1') return interaction.reply({ content: '❌ โซนใช้ได้เฉพาะ G1 ครับ', flags: 64 });
-    const player = getRacePlayer(userId);
-    if (!player) return interaction.reply({ content: 'คุณยังไม่ได้ลงทะเบียนครับ', flags: 64 });
-
-    const color = interaction.options.getString('color');
-    updateRacePlayer(userId, { zone_active: 1 });
-
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(color === 'gold' ? 0xD4AF37 : 0xffffff)
-        .setTitle(`✨ ${interaction.user.username} เปิดโซน!`)
-        .setDescription(`เลือกทอย **${color === 'gold' ? 'ทอง 🟡' : 'ขาว ⚪'}** — ใช้เซฟ/รีโรลระหว่างโซนได้ครับ`)],
-    });
-  }
 }
 
-// ── Train Handler ──
 async function handleTrain(interaction) {
   const sub = interaction.options.getSubcommand();
-  const isStaff = interaction.member?.roles?.cache?.some(r => r.name === STAFF_ROLE);
+  const isStaffMember = interaction.member?.roles?.cache?.some(r => r.name === STAFF_ROLE);
 
-  // ── /train submit ──
   if (sub === 'submit') {
-    const horse     = interaction.options.getUser('horse');
-    const trainType = interaction.options.getString('type');
-    const link      = interaction.options.getString('link');
-    const trainer   = interaction.user;
-
-    const typeLabel = {
-      chat:  'คุยสนทนา (3 บรรทัด+)',
-      group: 'ฝึกคู่/กลุ่ม',
-      solo:  'ฝึกคนเดียว',
-      hill:  'ฝึกล้างเนินมรณะ',
-    }[trainType];
-
-    // แจ้ง Staff channel
-    const staffChannel = await interaction.client.channels.fetch(TRAIN_CHANNEL_ID);
-    if (staffChannel) {
-      await staffChannel.send({
-        embeds: [new EmbedBuilder()
-          .setColor(0xF9A8C9)
-          .setTitle('📋 บทฝึกใหม่รอพิจารณา')
-          .addFields(
-            { name: '🏇 สาวม้า', value: `<@${horse.id}>`, inline: true },
-            { name: '👤 เทรนเนอร์', value: `<@${trainer.id}>`, inline: true },
-            { name: '📝 ประเภท', value: typeLabel, inline: true },
-            { name: '🔗 ลิงก์', value: link, inline: false },
-          )
-          .setFooter({ text: `ใช้ /train approve @สาวม้า ${trainType} เพื่ออนุมัติ` })],
-      });
-    }
-
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0x57f287)
-        .setDescription(`✅ ส่งบทฝึกให้ Staff พิจารณาแล้วครับ รอการอนุมัติ`)],
-      flags: 64,
-    });
+    const trainer  = interaction.options.getUser('trainer');
+    const horses   = interaction.options.getString('horses');
+    const type     = interaction.options.getString('type');
+    const location = interaction.options.getChannel('location');
+    const typeLabel = { chat:'คุยสนทนา', group:'ฝึกคู่/กลุ่ม', solo:'ฝึกคนเดียว', zone:'ฝึกโซน', hill:'ล้างเนินมรณะ' }[type];
+    try {
+      const ch = await interaction.client.channels.fetch(TRAIN_CHANNEL_ID);
+      if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0xF9A8C9).setTitle('📋 บทฝึกใหม่รอพิจารณา')
+        .addFields(
+          { name: '👤 เทรนเนอร์', value: `<@${trainer.id}>`, inline: true },
+          { name: '🏇 สาวม้า', value: horses, inline: true },
+          { name: '📝 ประเภท', value: typeLabel, inline: true },
+          { name: '📍 สถานที่', value: `<#${location.id}>`, inline: true },
+        ).setFooter({ text: `ส่งโดย ${interaction.user.username}` })] });
+    } catch(e) {}
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setDescription('✅ ส่งบทฝึกให้ Staff แล้วครับ รอการอนุมัติ')], flags: 64 });
   }
 
-  // ── /train approve ──
   if (sub === 'approve') {
-    if (!isStaff) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
-
-    const horse     = interaction.options.getUser('horse');
-    const trainType = interaction.options.getString('type');
-    const trainer   = interaction.options.getUser('trainer');
-
-    const horsePlayer   = getPlayer(horse.id);
-    const trainerPlayer = trainer ? getPlayer(trainer.id) : null;
-
-    // แจกรางวัลตามประเภท
+    if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
+    const horse   = interaction.options.getUser('horse');
+    const type    = interaction.options.getString('type');
+    const trainer = interaction.options.getUser('trainer');
+    const hp = getPlayer(horse.id);
+    const tp = trainer ? getPlayer(trainer.id) : null;
     let horseReward = '', trainerReward = '';
-
-    if (trainType === 'chat') {
-      // สาวม้า +1 reroll กิจกรรม, เทรนเนอร์ +1 reroll เทรนเนอร์
-      updatePlayer(horse.id, { inv_reroll: (horsePlayer.inv_reroll || 0) + 1 });
-      horseReward = '+1 Reroll กิจกรรม';
-      if (trainerPlayer) {
-        updatePlayer(trainer.id, { inv_reroll: (trainerPlayer.inv_reroll || 0) + 1 });
-        trainerReward = '+1 Reroll เทรนเนอร์';
-      }
-    } else if (trainType === 'group') {
-      updatePlayer(horse.id, { inv_reroll: (horsePlayer.inv_reroll || 0) + 2 });
-      horseReward = '+2 Reroll กิจกรรม';
-      if (trainerPlayer) {
-        updatePlayer(trainer.id, { inv_reroll: (trainerPlayer.inv_reroll || 0) + 2 });
-        trainerReward = '+2 Reroll เทรนเนอร์';
-      }
-    } else if (trainType === 'solo') {
-      // สาวม้า +1 one-use safe
-      updatePlayer(horse.id, { inv_reroll: (horsePlayer.inv_reroll || 0) + 1 });
-      horseReward = '+1 One-use Safe';
-    } else if (trainType === 'hill') {
-      // ล้าง hill debuff
-      const racePlayer = getRacePlayer(horse.id);
-      if (racePlayer) {
-        updateRacePlayer(horse.id, { hill_debuff: 0 });
-      }
+    if (type === 'chat') {
+      updatePlayer(horse.id, { inv_reroll: (hp.inv_reroll||0) + 1 }); horseReward = '+1 Reroll กิจกรรม';
+      if (tp) { updatePlayer(trainer.id, { inv_reroll: (tp.inv_reroll||0) + 1 }); trainerReward = '+1 Reroll เทรนเนอร์'; }
+    } else if (type === 'group') {
+      updatePlayer(horse.id, { inv_reroll: (hp.inv_reroll||0) + 2 }); horseReward = '+2 Reroll กิจกรรม';
+      if (tp) { updatePlayer(trainer.id, { inv_reroll: (tp.inv_reroll||0) + 2 }); trainerReward = '+2 Reroll เทรนเนอร์'; }
+    } else if (type === 'solo') {
+      updatePlayer(horse.id, { race_safe: (hp.race_safe||0) + 1 }); horseReward = '+1 One-use Safe';
+    } else if (type === 'hill') {
+      const rp = getRacePlayer(horse.id);
+      if (rp) updateRacePlayer(horse.id, { hill_debuff: 0 });
       horseReward = '✅ ล้าง Hill Debuff';
     }
-
-    const fields = [
-      { name: '🏇 สาวม้า', value: `<@${horse.id}>`, inline: true },
-      { name: '🎁 รางวัลสาวม้า', value: horseReward, inline: true },
-    ];
-    if (trainer && trainerReward) {
-      fields.push({ name: '👤 เทรนเนอร์', value: `<@${trainer.id}>`, inline: true });
-      fields.push({ name: '🎁 รางวัลเทรนเนอร์', value: trainerReward, inline: true });
-    }
-
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0x57f287)
-        .setTitle('✅ อนุมัติบทฝึกแล้ว!')
-        .addFields(...fields)],
-    });
+    const fields = [{ name: '🏇 สาวม้า', value: `<@${horse.id}>`, inline: true }, { name: '🎁 รางวัล', value: horseReward, inline: true }];
+    if (trainer && trainerReward) fields.push({ name: '👤 เทรนเนอร์', value: `<@${trainer.id}>`, inline: true }, { name: '🎁 รางวัล', value: trainerReward, inline: true });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('✅ อนุมัติบทฝึกแล้ว!').addFields(...fields)] });
   }
 }
 
-// ── Dice Table (v3.0) ──
-function getDiceNotation(style, phase, grade) {
-  // ตาราง upper (non-bold) — ใช้สำหรับ Debut/G3/G2
-  const upperTable = {
-    front: ['d30', '3d30',    '4d30',    '2d30'],
-    pace:  ['d30', '2d30',    '2d30',    '2d30'],
-    late:  ['d30', '2d30',    '3d30',    '2d30'],
-    end:   ['d30', '2d30',    '6d30',    'd30'],
-  };
-  // ตาราง lower (bold) — ใช้สำหรับ G1
-  const lowerTable = {
-    front: ['2d30',      '4d30',      '3d30',       'd30'],
-    pace:  ['3d30kh1',   '6d30kh2',   '6d30kh2',    '6d30kh3'],
-    late:  ['2d30kh1',   '4d30kh2',   '9d30kh3',    '3d30'],
-    end:   ['d30',       'd30',        '5d30',       'd30'],
-  };
-  const table = grade === 'g1' ? lowerTable : upperTable;
-  return table[style]?.[phase - 1] || 'd30';
-}
-
-// ── Main Handler ──
 async function handleMain(interaction) {
   const group = interaction.options.getSubcommandGroup();
   const sub   = interaction.options.getSubcommand();
-  const isStaff = interaction.member?.roles?.cache?.some(r => r.name === STAFF_ROLE);
-
+  const isStaffMember = interaction.member?.roles?.cache?.some(r => r.name === STAFF_ROLE);
   if (group === 'reroll' && sub === 'gift') {
-    if (!isStaff) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
+    if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
     const target = interaction.options.getUser('player');
     const p = getPlayer(target.id);
     const newMax = (p.race_reroll_max ?? 1) + 1;
     updatePlayer(target.id, { race_reroll_max: newMax, race_reroll: (p.race_reroll ?? 1) + 1 });
-    return interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0xD4AF37)
-        .setTitle('🎁 แจก Reroll ติดตัวสำเร็จ!')
-        .addFields(
-          { name: '👤 ผู้เล่น', value: `<@${target.id}>`, inline: true },
-          { name: '🔄 Reroll ติดตัวใหม่', value: `${newMax} อัน`, inline: true },
-        )],
-    });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle('🎁 แจก Reroll ติดตัวสำเร็จ!')
+      .addFields({ name: '👤 ผู้เล่น', value: `<@${target.id}>`, inline: true }, { name: '🔄 จำนวนใหม่', value: `${newMax} อัน`, inline: true })] });
   }
 }
-
-async function deployCommands() {
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-  await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-  console.log('Slash commands registered');
-}
-
-// ══════════════════════════════════════════════
-//  BOT
-// ══════════════════════════════════════════════
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.DirectMessages,
-  ],
-});
-// ตรวจสอบว่าเปิด Message Content Intent ใน Discord Developer Portal แล้ว
-
-client.once('clientReady', async () => {
-  console.log(`${BOTNAME} v7.0 online: ${client.user.tag}`);
-  await deployCommands();
-});
-
-client.on('messageCreate', async msg => {
-  if (msg.author.bot) return;
-  if (!msg.content.toLowerCase().startsWith(PREFIX)) return;
-  const raw = msg.content.slice(PREFIX.length).trim() || '1d20';
-  const parsed = parseRoll(raw);
-  if (parsed.err) return msg.reply(`Error: ${parsed.err}`);
-  const username = msg.member?.displayName || msg.author.username;
-  try {
-    const result = await buildRollEmbed(parsed, parsed.tokens, username, msg.author.id);
-    await msg.reply(result);
-  } catch (e) { console.error(e); }
-});
-
-client.on('interactionCreate', async interaction => {
-  try {
-    if (interaction.isChatInputCommand()) await handleSlash(interaction);
-    else if (interaction.isButton()) await handleButton(interaction);
-    else if (interaction.isStringSelectMenu()) await handleSelect(interaction);
-  } catch (e) {
-    console.error(e);
-    const rep = { content: 'Error: กรุณาลองใหม่ครับ', flags: 64 };
-    if (interaction.replied || interaction.deferred) await interaction.followUp(rep);
-    else await interaction.reply(rep);
-  }
-});
-
-// ══════════════════════════════════════════════
-//  COMMAND HANDLERS
-// ══════════════════════════════════════════════
-async function handleSlash(interaction) {
-  const cmd = interaction.commandName;
-  if (cmd === 'race') return handleRace(interaction);
-  if (cmd === 'train') return handleTrain(interaction);
-  if (cmd === 'main') return handleMain(interaction);
-  const userId = interaction.user.id;
-  const username = interaction.member?.displayName || interaction.user.username;
-
-  function getBundleColor() {
-    const p = getPlayer(userId);
-    const bundle = getBundle(p.equipped_bundle);
-    return bundle ? parseInt(bundle.emblemColor.slice(1), 16) : 0x444444;
-  }
-
-  // /roll
-  if (cmd === 'roll') {
-    const raw = interaction.options.getString('expression') || '1d20';
-    const parsed = parseRoll(raw);
-    if (parsed.err) return interaction.reply({ content: `Error: ${parsed.err}`, flags: 64 });
-    const rollResult = await buildRollEmbed(parsed, parsed.tokens, username, userId);
-    return interaction.reply(rollResult);
-  }
-
-  // /daily
-  if (cmd === 'daily') {
-    const p = getPlayer(userId);
-    const today = getDayKey();
-    if (p.last_daily === today) return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle('Daily').setDescription('รับแล้ววันนี้ครับ มาใหม่ตี 4!')], flags: 64 });
-    const yest = new Date(Date.now() + 7*60*60*1000);
-    yest.setUTCDate(yest.getUTCDate() - 1);
-    if (yest.getUTCHours() < 4) yest.setUTCDate(yest.getUTCDate() - 1);
-    const yestKey = yest.toISOString().slice(0, 10);
-    const streak = p.last_daily === yestKey ? (p.streak % 7) + 1 : 1;
-    const reward = DAILY_REWARDS[streak - 1];
-    const updates = { streak, last_daily: today };
-    if (reward.type === 'gold') updates.gold = p.gold + reward.amount;
-    if (reward.type === 'rc')   updates.rc   = p.rc   + reward.amount;
-    if (reward.type === 'item')  updates.inv_reroll = (p.inv_reroll || 0) + 1;
-    updatePlayer(userId, updates);
-    const trackSegs = Array.from({length:7}, (_,i) => {
-      if (i < streak - 1) return '`✓`';
-      if (i === streak - 1) return '**`★`**';
-      return '`·`';
-    }).join(' ');
-    const nextInfo = streak < 7 ? `พรุ่งนี้: **${DAILY_LABELS[streak]}**` : '**ครบ 7 วัน! Streak รีเซ็ต** 🎉';
-    const freshDaily = getPlayer(userId);
-    const balanceStr = reward.type === 'rc'
-      ? `RC: **${freshDaily.rc.toLocaleString()}**`
-      : reward.type === 'item'
-      ? `Re-roll: **x${freshDaily.inv_reroll || 0}**`
-      : `Gold: **${freshDaily.gold.toLocaleString()}**`;
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0x56CCF2)
-        .setTitle('🏇 Daily Login')
-        .addFields(
-          { name: `STREAK ${streak} / 7`, value: trackSegs, inline: false },
-          { name: '🎁 รางวัลวันนี้', value: `**${DAILY_LABELS[streak-1]}**`, inline: true },
-          { name: '💰 ยอดคงเหลือ', value: balanceStr, inline: true },
-          { name: '⏭ ถัดไป', value: nextInfo, inline: false },
-        )]
-    });
-  }
-
-  // /inventory
-  if (cmd === 'inventory') {
-    await interaction.deferReply();
-    const p = getPlayer(userId);
-    const buffer = await generateInventoryCard(p, username, 1);
-    const attachment = { attachment: buffer, name: 'inventory.png' };
-    const embed = new EmbedBuilder().setColor(getBundleColor()).setImage('attachment://inventory.png');
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`inv_p1_${userId}`).setLabel('📊 Economy').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`inv_p2_${userId}`).setLabel('👤 Profile').setStyle(ButtonStyle.Secondary),
-    );
-    return interaction.editReply({ embeds: [embed], files: [attachment], components: [row] });
-  }
-
-  // /convert
-  if (cmd === 'convert') {
-    const amount = interaction.options.getInteger('amount');
-    const p = getPlayer(userId);
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, flags: 64 });
-    if (amount % EXCHANGE_RATE !== 0) return interaction.reply({ content: `ต้องแลกเป็นทวีคูณของ ${EXCHANGE_RATE} ครับ`, flags: 64 });
-    const rc = amount / EXCHANGE_RATE;
-    updatePlayer(userId, { gold: p.gold - amount, rc: p.rc + rc });
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle('แลกเงิน')
-        .setDescription(`แลก **${amount.toLocaleString()} Gold** → **${rc.toLocaleString()} RC** แล้วครับ\nRC ทั้งหมด: **${(p.rc + rc).toLocaleString()}**`)]
-    });
-  }
-
-  // /use
-  if (cmd === 'use') {
-    const amount = interaction.options.getInteger('amount') || 1;
-    const p = getPlayer(userId);
-    if ((p.inv_reroll || 0) < amount) return interaction.reply({ content: `Re-roll ไม่พอครับ (มี ${p.inv_reroll || 0})`, flags: 64 });
-    updatePlayer(userId, { inv_reroll: p.inv_reroll - amount });
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle('ใช้ Re-roll')
-        .setDescription(`ใช้ Re-roll x${amount} แล้วครับ\nเหลือ: **x${p.inv_reroll - amount}**`)]
-    });
-  }
-
-  // /equip — Select Menu
-  if (cmd === 'equip') {
-    const p = getPlayer(userId);
-    const owned = getOwnedBundles(userId);
-    if (owned.length === 0) return interaction.reply({ content: 'ยังไม่มี bundle ครับ', flags: 64 });
-    const options = owned.map(id => {
-      const b = getBundle(id);
-      if (!b) return null;
-      const isEquipped = p.equipped_bundle === id;
-      return new StringSelectMenuOptionBuilder()
-        .setLabel(b.name + (isEquipped ? ' ✦' : ''))
-        .setDescription(isEquipped ? 'กำลังใส่อยู่' : (b.isSpecial ? 'Special Bundle' : `Gallop Collection · ${b.horse || ''}`))
-        .setValue(id);
-    }).filter(Boolean);
-    const select = new StringSelectMenuBuilder()
-      .setCustomId(`equip_select_${userId}`)
-      .setPlaceholder('เลือก bundle ที่ต้องการใส่...')
-      .addOptions(options);
-    const row = new ActionRowBuilder().addComponents(select);
-    const currentBundle = getBundle(p.equipped_bundle);
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle('✦ เปลี่ยน Bundle')
-        .addFields(
-          { name: 'Bundle ปัจจุบัน', value: currentBundle ? `**${currentBundle.name}**` : 'Default', inline: false },
-          { name: 'Bundle ในคลัง', value: `${owned.length} ชิ้น`, inline: false },
-        )
-        .setFooter({ text: 'เลือกจาก dropdown ด้านล่าง' })],
-      components: [row]
-    });
-  }
-
-  // /transfer
-  if (cmd === 'transfer') {
-    const target = interaction.options.getUser('user');
-    const amount = interaction.options.getInteger('amount');
-    if (target.id === userId) return interaction.reply({ content: 'โอนให้ตัวเองไม่ได้ครับ', flags: 64 });
-    const p = getPlayer(userId);
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ (มี ${p.gold.toLocaleString()})`, flags: 64 });
-    updatePlayer(userId, { gold: p.gold - amount });
-    const tp = getPlayer(target.id);
-    updatePlayer(target.id, { gold: tp.gold + amount });
-    const freshP = getPlayer(userId);
-    const senderAvatar = interaction.user.displayAvatarURL({ size: 64 });
-    const receiverAvatar = target.displayAvatarURL({ size: 64 });
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0x57f287)
-        .setTitle('💸 Transfer Complete')
-        .setThumbnail(receiverAvatar)
-        .addFields(
-          { name: '📤 ผู้โอน', value: `<@${userId}>`, inline: true },
-          { name: '📥 ผู้รับ', value: `<@${target.id}>`, inline: true },
-          { name: '​', value: '​', inline: true },
-          { name: '💰 จำนวน', value: `**${amount.toLocaleString()} Gold** 🪙`, inline: true },
-          { name: '🏦 คงเหลือ', value: `**${freshP.gold.toLocaleString()} Gold**`, inline: true },
-        )
-        .setAuthor({ name: username, iconURL: senderAvatar })
-        .setFooter({ text: '✓ COMPLETED' })]
-    });
-  }
-
-  // /coinflip
-  if (cmd === 'coinflip') {
-    const amount = interaction.options.getInteger('amount');
-    const choice = interaction.options.getString('choice');
-    const p = getPlayer(userId);
-    if (amount < MIN_BET) return interaction.reply({ content: `เดิมพันขั้นต่ำ ${MIN_BET.toLocaleString()} Gold ครับ`, flags: 64 });
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, flags: 64 });
-    const loss = applyLoss(userId, amount);
-    if (!loss.ok) return interaction.reply({ content: loss.reason, flags: 64 });
-    const result = randF() < 0.42 ? choice : (choice === 'heads' ? 'tails' : 'heads');
-    const win = result === choice;
-    const choiceEmoji = choice === 'heads' ? '☀️ HEADS' : '🌙 TAILS';
-    const resultEmoji = result === 'heads' ? '☀️ HEADS' : '🌙 TAILS';
-    if (win) {
-      const w = applyWin(userId, amount, 2);
-      return interaction.reply({
-        embeds: [new EmbedBuilder().setColor(0x57f287)
-          .setTitle('🪙 Coinflip — ชนะ!')
-          .addFields(
-            { name: 'คุณเลือก', value: choiceEmoji, inline: true },
-            { name: 'ผลออก', value: `**${resultEmoji}**`, inline: true },
-            { name: '​', value: '​', inline: true },
-            { name: '💰 ได้รับ', value: `+${w.profit.toLocaleString()} Gold`, inline: true },
-            { name: '🏦 ยอดรวม', value: `**${w.gold.toLocaleString()} Gold**`, inline: true },
-          )]
-      });
-    }
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0xed4245)
-        .setTitle('🪙 Coinflip — แพ้')
-        .addFields(
-          { name: 'คุณเลือก', value: choiceEmoji, inline: true },
-          { name: 'ผลออก', value: `**${resultEmoji}**`, inline: true },
-          { name: '​', value: '​', inline: true },
-          { name: '💸 เสีย', value: `-${amount.toLocaleString()} Gold`, inline: true },
-          { name: '🏦 ยอดรวม', value: `**${loss.gold.toLocaleString()} Gold**`, inline: true },
-        )]
-      });
-  }
-
-  // /slots
-  if (cmd === 'slots') {
-    const amount = interaction.options.getInteger('amount');
-    const p = getPlayer(userId);
-    if (amount < MIN_BET) return interaction.reply({ content: `เดิมพันขั้นต่ำ ${MIN_BET.toLocaleString()} Gold ครับ`, flags: 64 });
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, flags: 64 });
-    const loss = applyLoss(userId, amount);
-    if (!loss.ok) return interaction.reply({ content: loss.reason, flags: 64 });
-
-    const win = randF() < 0.18;
-    const reels = win ? [spinSlot(), null, null] : [spinSlot(), spinSlot(), spinSlot()];
-    if (win) {
-      reels[1] = reels[0]; reels[2] = reels[0];
-    } else {
-      reels[1] = spinSlot(); reels[2] = spinSlot();
-      // ป้องกัน 3 ตัวเหมือนกันตอนแพ้
-      while (reels[0] === reels[1] && reels[1] === reels[2]) reels[2] = spinSlot();
-    }
-    const reelStr = reels.map(r => SLOT_EMOJI[r]).join(' ');
-
-    if (win && reels[0] === 'seven') {
-      // Jackpot
-      const pool = getPool();
-      const jackpot = pool * JACKPOT_MULT;
-      const taxed = Math.floor(jackpot * (1 - TAX));
-      const fresh = getPlayer(userId);
-      updatePlayer(userId, { gold: fresh.gold + taxed });
-      setPool(0);
-      return interaction.reply({
-        embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('🎰 7 7 7 — JACKPOT!!!')
-          .addFields(
-            { name: '🎰 Reels', value: `${reelStr}`, inline: false },
-            { name: '🏆 Jackpot Pool', value: `${pool.toLocaleString()} × ${JACKPOT_MULT}`, inline: true },
-            { name: '💰 ได้รับ', value: `+${taxed.toLocaleString()} Gold`, inline: true },
-            { name: '🏦 ยอดรวม', value: `**${(fresh.gold + taxed).toLocaleString()} Gold**`, inline: false },
-          )]
-      });
-    }
-    if (win) {
-      const mult = SLOT_MULT[reels[0]];
-      const w = applyWin(userId, amount, mult);
-      return interaction.reply({
-        embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🎰 Slots — ชนะ!')
-          .addFields(
-            { name: '🎰 Reels', value: `${reelStr}`, inline: false },
-            { name: '✨ Multiplier', value: `**${mult}x**`, inline: true },
-            { name: '💰 ได้รับ', value: `+${w.profit.toLocaleString()} Gold`, inline: true },
-            { name: '🎯 Jackpot Pool', value: `${getPool().toLocaleString()} 🪙`, inline: true },
-            { name: '🏦 ยอดรวม', value: `**${w.gold.toLocaleString()} Gold**`, inline: false },
-          )]
-      });
-    }
-    // แพ้ — เพิ่ม pool
-    const contrib = Math.floor(amount * POOL_CONTRIB);
-    setPool(getPool() + contrib);
-    const freshP = getPlayer(userId);
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🎰 Slots — แพ้')
-        .addFields(
-          { name: '🎰 Reels', value: `${reelStr}`, inline: false },
-          { name: '💸 เสีย', value: `-${amount.toLocaleString()} Gold`, inline: true },
-          { name: '🎯 Jackpot Pool', value: `${getPool().toLocaleString()} 🪙`, inline: true },
-          { name: '🏦 ยอดรวม', value: `**${freshP.gold.toLocaleString()} Gold**`, inline: false },
-        )]
-    });
-  }
-
-  // /blackjack
-  if (cmd === 'blackjack') {
-    const amount = interaction.options.getInteger('amount');
-    const p = getPlayer(userId);
-    if (amount < MIN_BET) return interaction.reply({ content: `เดิมพันขั้นต่ำ ${MIN_BET.toLocaleString()} Gold ครับ`, flags: 64 });
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, flags: 64 });
-    if (bjGames.has(userId)) return interaction.reply({ content: 'มีเกมค้างอยู่ครับ', flags: 64 });
-    const loss = applyLoss(userId, amount);
-    if (!loss.ok) return interaction.reply({ content: loss.reason, flags: 64 });
-    const deck = makeDeck();
-    const player_hand = [deck.pop(), deck.pop()];
-    const dealer_hand = [deck.pop(), deck.pop()];
-    bjGames.set(userId, { deck, player: player_hand, dealer: dealer_hand, amount, startTime: Date.now() });
-    const pv = handVal(player_hand);
-    if (pv === 21) {
-      bjGames.delete(userId);
-      const w = applyWin(userId, amount, 2.5);
-      return interaction.reply({
-        embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('🃏 BLACKJACK! 21! 🎉')
-          .addFields(
-            { name: 'ไพ่คุณ', value: player_hand.map(c => cardStr(c)).join(' '), inline: false },
-            { name: '💰 ได้รับ', value: `+${w.profit.toLocaleString()} Gold (2.5x!)`, inline: true },
-            { name: '🏦 ยอดรวม', value: `**${w.gold.toLocaleString()} Gold**`, inline: true },
-          )]
-      });
-    }
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`bj_hit_${userId}`).setLabel('Hit').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`bj_dbl_${userId}`).setLabel('Double Hit 2x').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`bj_stand_${userId}`).setLabel('Stand').setStyle(ButtonStyle.Danger),
-    );
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('🃏 Blackjack')
-        .addFields(
-          { name: 'Dealer', value: `${cardStr(dealer_hand[0])} ??`, inline: true },
-          { name: `คุณ (${pv})`, value: player_hand.map(c => cardStr(c)).join(' '), inline: true },
-        )
-        .setFooter({ text: 'Double Hit = จั่ว 2 ใบ Stand อัตโนมัติ · ชนะได้ 2x' })],
-      components: [row]
-    });
-  }
-
-  // /roulette
-  if (cmd === 'roulette') {
-    const amount = interaction.options.getInteger('amount');
-    const bet = interaction.options.getString('bet').toLowerCase();
-    const p = getPlayer(userId);
-    if (amount < MIN_BET) return interaction.reply({ content: `เดิมพันขั้นต่ำ ${MIN_BET.toLocaleString()} Gold ครับ`, flags: 64 });
-    if (p.gold < amount) return interaction.reply({ content: `Gold ไม่พอครับ`, flags: 64 });
-    const validBets = ['red','black','odd','even','1-18','19-36',...Array.from({length:37},(_,i)=>String(i))];
-    if (!validBets.includes(bet)) return interaction.reply({ content: 'เดิมพันไม่ถูกต้องครับ', flags: 64 });
-    const loss = applyLoss(userId, amount);
-    if (!loss.ok) return interaction.reply({ content: loss.reason, flags: 64 });
-    const n = rand(0, 36);
-    const color = roulColor(n);
-    const emoji = color === 'red' ? '🔴' : color === 'black' ? '⚫' : '🟢';
-    const win = roulWin(bet, n);
-    const pay = roulPay(bet);
-    if (win) {
-      const w = applyWin(userId, amount, pay);
-      return interaction.reply({
-        embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🎡 Roulette — ชนะ!')
-          .addFields(
-            { name: 'ลูกหยุดที่', value: `${emoji} **${n}**`, inline: true },
-            { name: 'เดิมพัน', value: `**${bet}** (x${pay})`, inline: true },
-            { name: '​', value: '​', inline: true },
-            { name: '💰 ได้รับ', value: `+${w.profit.toLocaleString()} Gold`, inline: true },
-            { name: '🏦 ยอดรวม', value: `**${w.gold.toLocaleString()} Gold**`, inline: true },
-          )]
-      });
-    }
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🎡 Roulette — แพ้')
-        .addFields(
-          { name: 'ลูกหยุดที่', value: `${emoji} **${n}**`, inline: true },
-          { name: 'เดิมพัน', value: `**${bet}**`, inline: true },
-          { name: '​', value: '​', inline: true },
-          { name: '💸 เสีย', value: `-${amount.toLocaleString()} Gold`, inline: true },
-          { name: '🏦 ยอดรวม', value: `**${loss.gold.toLocaleString()} Gold**`, inline: true },
-        )]
-    });
-  }
-
-  // /help
-  if (cmd === 'help') {
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle("St. Elmo's Fire v7.0 — Help")
-        .addFields(
-          { name: '🎲 ลูกเต๋า', value: '`!r 2d30` — ทอยด่วน\n`/roll expression` — ทอยผ่าน slash command\nรองรับ `kh` `kl` `advantage` `disadvantage`', inline: false },
-          { name: '💰 เศรษฐกิจ', value: '`/daily` — รับรางวัลประจำวัน (รีเซ็ตตี 4)\n`/inventory` — ดูกระเป๋าสตางค์และไอเทม\n`/convert amount` — แลก 3 Gold = 1 RC\n`/use` — ใช้ Re-roll\n`/transfer @user amount` — โอน Gold ให้สมาชิก', inline: false },
-          { name: '✦ Bundle', value: '`/shop` — ดู Gallop Collection และซื้อ bundle (2,500 RC)\n`/equip` — เลือกใส่ bundle จาก dropdown', inline: false },
-          { name: '🎰 การพนัน', value: '`/coinflip amount` — ทอยเหรียญ หัว/ก้อย (42% ชนะ 2x)\n`/slots amount` — สล็อต (18% ชนะ + Progressive Jackpot)\n`/blackjack amount` — แบล็คแจ็ค dealer hits to 18\n`/roulette amount bet` — รูเล็ต (2x–36x)', inline: false },
-          { name: '👤 Profile', value: '`/profile set` — ตั้งชื่อตัวละคร ทีม และเทรนเนอร์', inline: false },
-          { name: '⚙️ Staff', value: '`/give` `/take` — แจก/ลบเงิน\n`/gift` — แจก bundle หรือ Re-roll (รับ @user หรือ @role)\n`/revoke` — ลบ item\n`/inspect @user` — ดู inventory สมาชิก\n`/showcase @user` — ตั้ง Race Showcase', inline: false },
-        )]
-    });
-  }
-
-  // /shop
-  if (cmd === 'shop') {
-    const p = getPlayer(userId);
-    const owned = getOwnedBundles(userId);
-
-    const gallopEntries = Object.entries(GALLOP_BUNDLES);
-    const options = gallopEntries.map(([id, b]) => {
-      const isOwned = owned.includes(id);
-      return new StringSelectMenuOptionBuilder()
-        .setLabel(`${b.name}${isOwned ? ' ✅' : ''}`)
-        .setDescription(`${b.horse} · ${isOwned ? 'มีแล้ว' : `${BUNDLE_PRICE.toLocaleString()} RC`}`)
-        .setValue(id);
-    });
-
-    const select = new StringSelectMenuBuilder()
-      .setCustomId(`shop_buy_${userId}`)
-      .setPlaceholder('เลือก bundle ที่ต้องการซื้อ...')
-      .addOptions(options);
-
-    const row = new ActionRowBuilder().addComponents(select);
-
-    const desc = gallopEntries.map(([id, b]) => {
-      const isOwned = owned.includes(id);
-      return `${isOwned ? '✅' : '🔒'} **${b.name}** — ${isOwned ? 'มีแล้ว' : `${BUNDLE_PRICE.toLocaleString()} RC`}\n↳ *${b.horse}*`;
-    }).join('\n\n');
-
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(getBundleColor())
-        .setTitle('🐴 Gallop Collection')
-        .setDescription(`RC ของคุณ: **${p.rc.toLocaleString()} RC**\n\n${desc}`)
-        .setFooter({ text: 'เลือกจาก dropdown ด้านล่างเพื่อซื้อ' })],
-      components: [row]
-    });
-  }
-
-  // /profile set
-  if (cmd === 'profile') {
-    const sub = interaction.options.getSubcommand();
-    if (sub === 'set') {
-      const name    = interaction.options.getString('name');
-      const team    = interaction.options.getString('team');
-      const trainer = interaction.options.getString('trainer');
-      if (!name && !team && !trainer) return interaction.reply({ content: 'กรุณาใส่อย่างน้อย 1 อย่างครับ', flags: 64 });
-      const updates = {};
-      if (name)    updates.char_name    = name;
-      if (team)    updates.team_name    = team;
-      if (trainer) updates.trainer_name = trainer;
-      // ensure profile row exists
-      getProfile(userId);
-      const keys = Object.keys(updates).map(k => `${k} = ?`).join(', ');
-      db.prepare(`UPDATE profiles SET ${keys} WHERE user_id = ?`).run(...Object.values(updates), userId);
-      return interaction.reply({
-        embeds: [new EmbedBuilder().setColor(getBundleColor()).setTitle('✦ Profile Updated')
-          .setDescription(`อัพเดท profile แล้วครับ!\n${name ? `ชื่อตัวละคร: **${name}**\n` : ''}${team ? `ทีม: **${team}**\n` : ''}${trainer ? `เทรนเนอร์: **${trainer}**` : ''}`)]
-      });
-    }
-  }
-
-  // Staff: /give
-  if (cmd === 'give') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
-    await interaction.deferReply();
-    const target = interaction.options.getMentionable('targets');
-    const currency = interaction.options.getString('currency');
-    const amount = interaction.options.getInteger('amount');
-    const guild = interaction.guild;
-    await guild.members.fetch();
-
-    const targetIds = new Set();
-    if (target.members) {
-      target.members.forEach(m => targetIds.add(m.id));
-    } else if (target.id) {
-      targetIds.add(target.id);
-    }
-
-    if (targetIds.size === 0) return interaction.editReply({ content: 'ไม่พบ user หรือ role ที่ระบุครับ' });
-
-    let successCount = 0;
-    for (const tid of targetIds) {
-      try {
-        const tp = getPlayer(tid);
-        updatePlayer(tid, { [currency]: (tp[currency] || 0) + amount });
-        successCount++;
-      } catch (e) { console.error('Give error for ' + tid + ':', e); }
-    }
-
-    const currencyLabel = currency === 'gold' ? 'Gold 🪙' : 'RC 🌈';
-    return interaction.editReply({
-      embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('[Staff] Give')
-        .setDescription(`แจก **${amount.toLocaleString()} ${currencyLabel}** ให้ ${successCount} คน เรียบร้อยแล้วครับ`)]
-    });
-  }
-
-  // Staff: /gift (รับ user หรือ role)
-  if (cmd === 'gift') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
-    await interaction.deferReply();
-    const target = interaction.options.getMentionable('targets');
-    const item = interaction.options.getString('item');
-    const guild = interaction.guild;
-    await guild.members.fetch();
-
-    const targetIds = new Set();
-    if (target.members) {
-      // เป็น Role
-      target.members.forEach(m => targetIds.add(m.id));
-    } else if (target.id) {
-      // เป็น User
-      targetIds.add(target.id);
-    }
-
-    if (targetIds.size === 0) return interaction.editReply({ content: 'ไม่พบ user หรือ role ที่ระบุครับ' });
-
-    const giftAmount = interaction.options.getInteger('amount') || 1;
-    let successCount = 0;
-    for (const tid of targetIds) {
-      try {
-        const tp = getPlayer(tid);
-        if (item === 'reroll') {
-          updatePlayer(tid, { inv_reroll: (tp.inv_reroll || 0) + giftAmount });
-        } else if (item === 'race_reroll') {
-          updatePlayer(tid, { race_reroll: (tp.race_reroll ?? 1) + giftAmount });
-        } else if (item === 'race_safe') {
-          updatePlayer(tid, { race_safe: (tp.race_safe ?? 0) + giftAmount });
-        } else if (ALL_BUNDLES[item]) {
-          addBundle(tid, item);
-        }
-        successCount++;
-      } catch (e) { console.error(`Gift error for ${tid}:`, e); }
-    }
-
-    const bundle = ALL_BUNDLES[item];
-    const itemLabel = {
-      reroll: `Re-roll x${giftAmount}`,
-      race_reroll: `Race Reroll x${giftAmount}`,
-      race_safe: `Race Safe x${giftAmount}`,
-    }[item] || (bundle ? bundle.name : item);
-
-    return interaction.editReply({
-      embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('[Staff] Gift')
-        .setDescription(`แจก **${itemLabel}** ให้ ${successCount} คน เรียบร้อยแล้วครับ`)]
-    });
-  }
-
-  // Staff: /take
-  if (cmd === 'take') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
-    const target = interaction.options.getUser('user');
-    const currency = interaction.options.getString('currency');
-    const amount = interaction.options.getInteger('amount');
-    const tp = getPlayer(target.id);
-    const newVal = Math.max(0, tp[currency] - amount);
-    updatePlayer(target.id, { [currency]: newVal });
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('[Staff] Take')
-        .setDescription(`ลบ **${amount.toLocaleString()} ${currency === 'gold' ? 'Gold' : 'RC'}** จาก <@${target.id}> แล้วครับ`)]
-    });
-  }
-
-  // Staff: /revoke
-  if (cmd === 'revoke') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
-    const target = interaction.options.getUser('user');
-    const item = interaction.options.getString('item');
-    const amount = interaction.options.getInteger('amount');
-    const tp = getPlayer(target.id);
-    if (item === 'reroll') {
-      updatePlayer(target.id, { inv_reroll: Math.max(0, (tp.inv_reroll || 0) - amount) });
-    }
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('[Staff] Revoke')
-        .setDescription(`ลบ **${item} x${amount}** จาก <@${target.id}> แล้วครับ`)]
-    });
-  }
-
-  // Staff: /inspect
-  if (cmd === 'inspect') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
-    await interaction.deferReply({ flags: 64 });
-    const target = interaction.options.getUser('user');
-    const tp = getPlayer(target.id);
-    const owned = getOwnedBundles(target.id);
-    const profile = getProfile(target.id);
-    const bar = Array.from({length:7}, (_,i) => i < tp.streak ? '⭐' : '☆').join(' ');
-    const bundleList = owned.map(id => ALL_BUNDLES[id]?.name || id).join(', ') || 'ไม่มี';
-
-    const buffer = await generateInventoryCard(tp, target.username, 1);
-    const attachment = { attachment: buffer, name: 'inspect.png' };
-    const embed = new EmbedBuilder().setColor(0xffa500)
-      .setTitle(`[Staff] Inspect — ${target.username}`)
-      .addFields(
-        { name: 'ยอดเงิน', value: `Gold: **${tp.gold.toLocaleString()}**\nRC: **${tp.rc.toLocaleString()}**\nชนะวันนี้: ${tp.win_today.toLocaleString()}/${WIN_CAP.toLocaleString()}`, inline: true },
-        { name: 'Items', value: `Re-roll: x${tp.inv_reroll || 0}`, inline: true },
-        { name: 'Daily Streak', value: `${bar}\n${tp.streak}/7`, inline: true },
-        { name: 'Bundle ปัจจุบัน', value: ALL_BUNDLES[tp.equipped_bundle]?.name || 'Default', inline: true },
-        { name: 'Bundles ทั้งหมด', value: bundleList, inline: false },
-        { name: 'Profile', value: `ชื่อ: ${profile.char_name || '—'}\nทีม: ${profile.team_name || '—'}\nเทรนเนอร์: ${profile.trainer_name || '—'}`, inline: false },
-      )
-      .setImage('attachment://inspect.png');
-    return interaction.editReply({ embeds: [embed], files: [attachment] });
-  }
-
-  // Staff: /showcase
-  if (cmd === 'showcase') {
-    if (!isStaff(interaction.member)) return interaction.reply({ content: 'Staff เท่านั้นครับ', flags: 64 });
-    const target = interaction.options.getUser('user');
-    const slot = interaction.options.getInteger('slot');
-    const race  = interaction.options.getString('race');
-    const rank  = interaction.options.getString('rank');
-    const grade = interaction.options.getString('grade');
-    const year  = interaction.options.getString('year');
-    getProfile(target.id);
-    const prefix = `showcase_${slot}`;
-    if (race.toLowerCase() === 'clear') {
-      db.prepare(`UPDATE profiles SET ${prefix}_race='', ${prefix}_rank='', ${prefix}_grade='', ${prefix}_year='' WHERE user_id=?`).run(target.id);
-      return interaction.reply({
-        embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('[Staff] Showcase Cleared')
-          .setDescription(`ลบ showcase ช่อง ${slot} ของ <@${target.id}> แล้วครับ`)]
-      });
-    }
-    const rankVal  = rank  || '';
-    const gradeVal = grade || '';
-    const yearVal  = year  || '';
-    db.prepare(`UPDATE profiles SET ${prefix}_race=?, ${prefix}_rank=?, ${prefix}_grade=?, ${prefix}_year=? WHERE user_id=?`)
-      .run(race, rankVal, gradeVal, yearVal, target.id);
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('[Staff] Showcase Updated')
-        .setDescription(`อัพเดท showcase ช่อง ${slot} ของ <@${target.id}> แล้วครับ\n**${race}** — ${rankVal} (${gradeVal} · ${yearVal})`)]
-    });
-  }
-}
-
-// ══════════════════════════════════════════════
-//  SELECT MENU HANDLER (Shop)
-// ══════════════════════════════════════════════
-async function handleSelect(interaction) {
-  const id = interaction.customId;
-  const userId = interaction.user.id;
-
-  // Equip select
-  if (id.startsWith('equip_select_')) {
-    if (!id.endsWith(userId)) return interaction.reply({ content: 'นี่ไม่ใช่ของคุณครับ', flags: 64 });
-    const bundleId = interaction.values[0];
-    const bundle = getBundle(bundleId);
-    if (!bundle) return interaction.reply({ content: 'ไม่พบ bundle ครับ', flags: 64 });
-    const owned = getOwnedBundles(userId);
-    if (!owned.includes(bundleId)) return interaction.reply({ content: 'ยังไม่มี bundle นี้ครับ', flags: 64 });
-    updatePlayer(userId, { equipped_bundle: bundleId });
-    const color = parseInt(bundle.emblemColor.replace('#',''), 16);
-    return interaction.update({
-      embeds: [new EmbedBuilder().setColor(color).setTitle('✦ Equip Bundle')
-        .setDescription(`ใส่ **${bundle.name}** แล้วครับ!`)],
-      components: []
-    });
-  }
-
-  if (id.startsWith('shop_buy_')) {
-    if (!id.endsWith(userId)) return interaction.reply({ content: 'นี่ไม่ใช่ shop ของคุณครับ', flags: 64 });
-    const bundleId = interaction.values[0];
-    const bundle = GALLOP_BUNDLES[bundleId];
-    if (!bundle) return interaction.reply({ content: 'ไม่พบ bundle ครับ', flags: 64 });
-
-    const owned = getOwnedBundles(userId);
-    if (owned.includes(bundleId)) return interaction.reply({ content: `มี **${bundle.name}** อยู่แล้วครับ`, flags: 64 });
-
-    const p = getPlayer(userId);
-    if (p.rc < BUNDLE_PRICE) return interaction.reply({
-      content: `RC ไม่พอครับ (มี ${p.rc.toLocaleString()} / ต้องการ ${BUNDLE_PRICE.toLocaleString()})`, flags: 64 });
-
-    // Confirm button
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`shop_confirm_${userId}_${bundleId}`).setLabel('✅ ยืนยันซื้อ').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`shop_cancel_${userId}`).setLabel('❌ ยกเลิก').setStyle(ButtonStyle.Danger),
-    );
-
-    const ec = hexToRgb(bundle.emblemColor);
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(parseInt(bundle.emblemColor.slice(1), 16))
-        .setTitle(`ยืนยันการซื้อ`)
-        .setDescription(`กำลังจะซื้อ **${bundle.name}**\nม้า: *${bundle.horse}*\n\nราคา: **${BUNDLE_PRICE.toLocaleString()} RC**\nRC ที่มี: **${p.rc.toLocaleString()} RC**\nRC หลังซื้อ: **${(p.rc - BUNDLE_PRICE).toLocaleString()} RC**`)],
-      components: [row], flags: 64 });
-  }
-}
-
-// ══════════════════════════════════════════════
-//  BUTTON HANDLER
-// ══════════════════════════════════════════════
-async function handleButton(interaction) {
-  const id = interaction.customId;
-  const userId = interaction.user.id;
-
-  // Inventory page toggle
-  if (id.startsWith('inv_p1_') || id.startsWith('inv_p2_')) {
-    const targetUser = id.split('_')[2];
-    if (targetUser !== userId) return interaction.reply({ content: 'นี่ไม่ใช่ inventory ของคุณครับ', flags: 64 });
-    const page = id.startsWith('inv_p1_') ? 1 : 2;
-    await interaction.deferUpdate();
-    const p = getPlayer(userId);
-    const buffer = await generateInventoryCard(p, interaction.member?.displayName || interaction.user.username, page);
-    const attachment = { attachment: buffer, name: 'inventory.png' };
-    const bundle = getBundle(p.equipped_bundle);
-    const color = bundle ? parseInt(bundle.emblemColor.slice(1), 16) : 0x444444;
-    const embed = new EmbedBuilder().setColor(color).setImage('attachment://inventory.png');
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`inv_p1_${userId}`).setLabel('📊 Economy').setStyle(page === 1 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`inv_p2_${userId}`).setLabel('👤 Profile').setStyle(page === 2 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    );
-    return interaction.editReply({ embeds: [embed], files: [attachment], components: [row] });
-  }
-
-  // Shop confirm
-  if (id.startsWith('shop_confirm_')) {
-    const parts = id.split('_');
-    const targetUser = parts[2];
-    const bundleId = parts.slice(3).join('_');
-    if (targetUser !== userId) return interaction.reply({ content: 'นี่ไม่ใช่ shop ของคุณครับ', flags: 64 });
-
-    const bundle = GALLOP_BUNDLES[bundleId];
-    if (!bundle) return interaction.reply({ content: 'ไม่พบ bundle ครับ', flags: 64 });
-
-    const p = getPlayer(userId);
-    const owned = getOwnedBundles(userId);
-    if (owned.includes(bundleId)) return interaction.update({ content: `มี **${bundle.name}** อยู่แล้วครับ`, components: [], embeds: [] });
-    if (p.rc < BUNDLE_PRICE) return interaction.update({ content: `RC ไม่พอแล้วครับ`, components: [], embeds: [] });
-
-    updatePlayer(userId, { rc: p.rc - BUNDLE_PRICE });
-    addBundle(userId, bundleId);
-
-    return interaction.update({
-      embeds: [new EmbedBuilder().setColor(parseInt(bundle.emblemColor.slice(1), 16))
-        .setTitle('✦ ซื้อ Bundle สำเร็จ!')
-        .setDescription(`ได้รับ **${bundle.name}** แล้วครับ!\n-${BUNDLE_PRICE.toLocaleString()} RC\nRC เหลือ: **${(p.rc - BUNDLE_PRICE).toLocaleString()}**\n\nใช้ \`/equip\` เพื่อใส่ bundle ได้เลยครับ`)],
-      components: []
-    });
-  }
-
-  // Shop cancel
-  if (id.startsWith('shop_cancel_')) {
-    return interaction.update({ content: 'ยกเลิกแล้วครับ', components: [], embeds: [] });
-  }
-
-  // Blackjack
-  if (!id.startsWith('bj_')) return;
-  if (!id.endsWith(userId)) return interaction.reply({ content: 'นี่ไม่ใช่เกมของคุณครับ', flags: 64 });
-  const game = bjGames.get(userId);
-  if (!game) return interaction.reply({ content: 'หมดเวลาแล้วครับ', flags: 64 });
-
-  if (id.startsWith('bj_hit_')) {
-    game.player.push(game.deck.pop());
-    const pv = handVal(game.player);
-    if (pv > 21) {
-      bjGames.delete(userId);
-      const fresh = getPlayer(userId);
-      return interaction.update({
-        embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🃏 Blackjack — แพ้ (Bust)')
-          .addFields(
-            { name: `คุณ (${pv})`, value: game.player.map(c => cardStr(c)).join(' '), inline: false },
-            { name: '💸 เสีย', value: `-${game.amount.toLocaleString()} Gold`, inline: true },
-            { name: '🏦 ยอดรวม', value: `**${fresh.gold.toLocaleString()} Gold**`, inline: true },
-          )],
-        components: []
-      });
-    }
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`bj_hit_${userId}`).setLabel('Hit').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`bj_dbl_${userId}`).setLabel('Double Hit 2x').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`bj_stand_${userId}`).setLabel('Stand').setStyle(ButtonStyle.Danger),
-    );
-    return interaction.update({
-      embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('🃏 Blackjack')
-        .addFields(
-          { name: 'Dealer', value: `${cardStr(game.dealer[0])} ??`, inline: true },
-          { name: `คุณ (${pv})`, value: game.player.map(c => cardStr(c)).join(' '), inline: true },
-        )
-        .setFooter({ text: 'Double Hit = จั่ว 2 ใบ Stand อัตโนมัติ · ชนะได้ 2x' })],
-      components: [row]
-    });
-  }
-
-  if (id.startsWith('bj_dbl_')) {
-    // Double Hit — จั่ว 2 ใบ stand อัตโนมัติ ชนะได้ 2x
-    game.player.push(game.deck.pop());
-    game.player.push(game.deck.pop());
-    bjGames.delete(userId);
-    const pv = handVal(game.player);
-    if (pv > 21) {
-      const fresh = getPlayer(userId);
-      return interaction.update({
-        embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🃏 Blackjack — แพ้ (Bust)')
-          .addFields(
-            { name: `คุณ (${pv})`, value: game.player.map(c => cardStr(c)).join(' '), inline: false },
-            { name: '💸 เสีย', value: `-${game.amount.toLocaleString()} Gold`, inline: true },
-            { name: '🏦 ยอดรวม', value: `**${fresh.gold.toLocaleString()} Gold**`, inline: true },
-          )],
-        components: []
-      });
-    }
-    while (handVal(game.dealer) < 18) game.dealer.push(game.deck.pop());
-    const dv = handVal(game.dealer);
-    const dStr = game.dealer.map(c => cardStr(c)).join(' ');
-    const pStr = game.player.map(c => cardStr(c)).join(' ');
-    if (dv > 21 || pv > dv) {
-      const w = applyWin(userId, game.amount, 4); // 2x payout = 4x mult
-      return interaction.update({
-        embeds: [new EmbedBuilder().setColor(0xffd700).setTitle('🃏 Blackjack — Double Hit ชนะ! 🎉')
-          .addFields(
-            { name: `Dealer (${dv})`, value: dStr, inline: true },
-            { name: `คุณ (${pv})`, value: pStr, inline: true },
-            { name: '💰 ได้รับ', value: `+${w.profit.toLocaleString()} Gold (2x!)`, inline: true },
-            { name: '🏦 ยอดรวม', value: `**${w.gold.toLocaleString()} Gold**`, inline: true },
-          )],
-        components: []
-      });
-    }
-    if (pv === dv) {
-      const p2 = getPlayer(userId);
-      updatePlayer(userId, { gold: p2.gold + game.amount });
-      const fresh2 = getPlayer(userId);
-      return interaction.update({
-        embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('🃏 Blackjack — เสมอ')
-          .addFields(
-            { name: `Dealer (${dv})`, value: dStr, inline: true },
-            { name: `คุณ (${pv})`, value: pStr, inline: true },
-            { name: '🏦 คืนเงิน', value: `**${fresh2.gold.toLocaleString()} Gold**`, inline: false },
-          )],
-        components: []
-      });
-    }
-    const freshL = getPlayer(userId);
-    return interaction.update({
-      embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🃏 Blackjack — แพ้')
-        .addFields(
-          { name: `Dealer (${dv})`, value: dStr, inline: true },
-          { name: `คุณ (${pv})`, value: pStr, inline: true },
-          { name: '💸 เสีย', value: `-${game.amount.toLocaleString()} Gold`, inline: true },
-          { name: '🏦 ยอดรวม', value: `**${freshL.gold.toLocaleString()} Gold**`, inline: true },
-        )],
-      components: []
-    });
-  }
-
-  if (id.startsWith('bj_stand_')) {
-    bjGames.delete(userId);
-    while (handVal(game.dealer) < 18) game.dealer.push(game.deck.pop());
-    const pv = handVal(game.player), dv = handVal(game.dealer);
-    const dStr = `Dealer (${dv}): ${game.dealer.map(c => cardStr(c)).join(' ')}`;
-    const pStr = `คุณ (${pv}): ${game.player.map(c => cardStr(c)).join(' ')}`;
-    if (dv > 21 || pv > dv) {
-      const w = applyWin(userId, game.amount, 2);
-      return interaction.update({
-        embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🃏 Blackjack — ชนะ!')
-          .addFields(
-            { name: `Dealer (${dv})`, value: dStr, inline: true },
-            { name: `คุณ (${pv})`, value: pStr, inline: true },
-            { name: '💰 ได้รับ', value: `+${w.profit.toLocaleString()} Gold`, inline: true },
-            { name: '🏦 ยอดรวม', value: `**${w.gold.toLocaleString()} Gold**`, inline: true },
-          )],
-        components: []
-      });
-    }
-    if (pv === dv) {
-      const p = getPlayer(userId);
-      updatePlayer(userId, { gold: p.gold + game.amount });
-      const fresh = getPlayer(userId);
-      return interaction.update({
-        embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('🃏 Blackjack — เสมอ')
-          .addFields(
-            { name: `Dealer (${dv})`, value: dStr, inline: true },
-            { name: `คุณ (${pv})`, value: pStr, inline: true },
-            { name: '🏦 คืนเงิน', value: `**${fresh.gold.toLocaleString()} Gold**`, inline: false },
-          )],
-        components: []
-      });
-    }
-    const fresh = getPlayer(userId);
-    return interaction.update({
-      embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🃏 Blackjack — แพ้')
-        .addFields(
-          { name: `Dealer (${dv})`, value: dStr, inline: true },
-          { name: `คุณ (${pv})`, value: pStr, inline: true },
-          { name: '💸 เสีย', value: `-${game.amount.toLocaleString()} Gold`, inline: true },
-          { name: '🏦 ยอดรวม', value: `**${fresh.gold.toLocaleString()} Gold**`, inline: true },
-        )],
-      components: []
-    });
-  }
-}
-
-client.login(process.env.DISCORD_TOKEN);
-
 
 
 const commands = [
@@ -2789,7 +1648,7 @@ const commands = [
         { name: 'The Rising Son', value: 'the_rising_son' },
         { name: 'The Mighty One', value: 'the_mighty_one' },
       ))
-    .addIntegerOption(o => o.setName('amount').setDescription('จำนวน (สำหรับ reroll/safe)').setRequired(false).setMinValue(1).setMaxValue(99)),
+    .addIntegerOption(o => o.setName('amount').setDescription('จำนวน').setRequired(false).setMinValue(1).setMaxValue(99)),
 
   new SlashCommandBuilder().setName('take').setDescription('[Staff] ลบเงิน')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
@@ -2823,6 +1682,11 @@ const commands = [
     .setDescription('[Staff] จัดการ reroll ติดตัว')
     .addSubcommandGroup(group => group
       .setName('reroll')
+      .setDescription('จัดการ reroll ติดตัว')
+      .addSubcommand(sub => sub
+        .setName('gift')
+        .setDescription('[Staff] บวก +1 reroll ติดตัวให้ผู้เล่น')
+        .addUserOption(o => o.setName('player').setDescription('ผู้เล่น').setRequired(true)))),
 ].map(c => c.toJSON());
 
 async function deployCommands() {
