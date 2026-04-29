@@ -1507,6 +1507,7 @@ async function handleRace(interaction) {
     if (!player) return interaction.reply({ content: 'ผู้เล่นยังไม่ได้ลงทะเบียนครับ', flags: 64 });
     const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
     const result = rollDiceNotation(notation);
+    if (!result) return interaction.reply({ content: `Dice notation ไม่ถูกต้องครับ: ${notation}`, flags: 64 });
     const track = TRACKS[session.track];
     let hillMsg = '';
     let baseScore = player.score;
@@ -1545,6 +1546,7 @@ async function handleRace(interaction) {
     else { updateRacePlayer(userId, { race_safes: player.race_safes - 1 }); }
     const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
     const newResult = rollDiceNotation(notation);
+    if (!newResult) return interaction.reply({ content: 'Dice notation ไม่ถูกต้องครับ', flags: 64 });
     // ลบคะแนนเดิมที่เพิ่งทอย แล้วบวกคะแนนใหม่
     const scoreWithoutOld = player.score - lastRoll.total;
     const newScore = scoreWithoutOld + newResult.total;
@@ -1565,6 +1567,7 @@ async function handleRace(interaction) {
     const penalty = count * 10;
     const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
     const newResult = rollDiceNotation(notation);
+    if (!newResult) return interaction.reply({ content: 'Dice notation ไม่ถูกต้องครับ', flags: 64 });
     const newAllOutScore = player.score + newResult.total - penalty;
     updateRacePlayer(userId, { all_out_count: count, score: newAllOutScore, last_roll: JSON.stringify(newResult) });
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757).setTitle(`💥 ${interaction.user.username} — All Out! (ครั้งที่ ${count})`)
@@ -1583,6 +1586,7 @@ async function handleRace(interaction) {
     updatePlayer(userId, { race_reroll: (mp.race_reroll ?? 1) - 1 });
     const notation = getDiceNotation(tp.run_style, session.current_phase, session.grade);
     const newResult = rollDiceNotation(notation);
+    if (!newResult) return interaction.reply({ content: 'Dice notation ไม่ถูกต้องครับ', flags: 64 });
     const old = tp.last_roll ? JSON.parse(tp.last_roll) : null;
     // ลบคะแนนเดิม แล้วบวกคะแนนใหม่
     const tpScoreNew = old ? (tp.score - old.total + newResult.total) : (tp.score + newResult.total);
