@@ -60,7 +60,7 @@ const POOL_CONTRIB  = 0.05;
 const STARTING_GOLD = 1500;
 const EXCHANGE_RATE = 3;
 const STAFF_ROLE    = 'Staff';
-const STAFF_ROLE_ID    = '1498609368952864768';
+const STAFF_ROLE_ID    = '1441679665893740614';
 const TRAINER_ROLE_ID  = '1441818898990366861';
 const UMA_OFFICIAL_ID  = '1441790925025185843';
 const UMA_OC_ID        = '1463876027720798418';
@@ -1509,16 +1509,18 @@ async function handleRace(interaction) {
     const result = rollDiceNotation(notation);
     const track = TRACKS[session.track];
     let hillMsg = '';
+    let baseScore = player.score;
     if (track?.hasHill && track.hillPhases.includes(session.current_phase) && !player.hill_debuff) {
       const penalty = track.hillPenalty[player.run_style] || 0;
-      updateRacePlayer(target.id, { hill_debuff: 1, score: player.score - penalty });
+      baseScore -= penalty;
+      updateRacePlayer(target.id, { hill_debuff: 1 });
       hillMsg = `\n⛰️ **เนินมรณะ** หัก -${penalty} แต้ม`;
     }
-    updateRacePlayer(target.id, { last_roll: JSON.stringify(result), score: player.score + result.total });
+    updateRacePlayer(target.id, { last_roll: JSON.stringify(result), score: baseScore + result.total });
     const canSafe = canUseSafe(result);
-    const distCfgR = DISTANCE_CONFIG[session.distance];
-    const turnsInPhase = distCfgR.turnsPerPhase[session.current_phase - 1];
-    const newScore = player.score + result.total;
+    const distCfgR = DISTANCE_CONFIG[session.distance] || DISTANCE_CONFIG['mile_medium'];
+    const turnsInPhase = distCfgR.turnsPerPhase[(session.current_phase - 1)] || 3;
+    const newScore = baseScore + result.total;
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37)
       .setTitle(`🎲 ${target.username} — เฟส ${session.current_phase} เทิร์น ${session.current_turn}`)
       .addFields(
@@ -1543,9 +1545,16 @@ async function handleRace(interaction) {
     else { updateRacePlayer(userId, { race_safes: player.race_safes - 1 }); }
     const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
     const newResult = rollDiceNotation(notation);
-    updateRacePlayer(userId, { last_roll: JSON.stringify(newResult) });
+    // ลบคะแนนเดิมที่เพิ่งทอย แล้วบวกคะแนนใหม่
+    const scoreWithoutOld = player.score - lastRoll.total;
+    const newScore = scoreWithoutOld + newResult.total;
+    updateRacePlayer(userId, { last_roll: JSON.stringify(newResult), score: newScore });
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle(`🛡️ ${interaction.user.username} ใช้ Safe!`)
-      .addFields({ name: '📊 ผลเดิม', value: `~~${lastRoll.display}~~`, inline: true }, { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true })] });
+      .addFields(
+        { name: '📊 ผลเดิม', value: `~~${lastRoll.display}~~`, inline: true },
+        { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true },
+        { name: '📈 คะแนนรวม', value: `**${newScore.toLocaleString()}** แต้ม`, inline: true },
+      )] });
   }
 
   if (sub === 'allout') {
@@ -1556,7 +1565,8 @@ async function handleRace(interaction) {
     const penalty = count * 10;
     const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
     const newResult = rollDiceNotation(notation);
-    updateRacePlayer(userId, { all_out_count: count, score: player.score - penalty, last_roll: JSON.stringify(newResult) });
+    const newAllOutScore = player.score + newResult.total - penalty;
+    updateRacePlayer(userId, { all_out_count: count, score: newAllOutScore, last_roll: JSON.stringify(newResult) });
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757).setTitle(`💥 ${interaction.user.username} — All Out! (ครั้งที่ ${count})`)
       .addFields({ name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true }, { name: '💔 หักแต้ม', value: `-${penalty} แต้ม`, inline: true }, { name: '🤕 อาการ', value: getAllOutInjury(count) })] });
   }
@@ -1574,7 +1584,9 @@ async function handleRace(interaction) {
     const notation = getDiceNotation(tp.run_style, session.current_phase, session.grade);
     const newResult = rollDiceNotation(notation);
     const old = tp.last_roll ? JSON.parse(tp.last_roll) : null;
-    updateRacePlayer(target.id, { last_roll: JSON.stringify(newResult) });
+    // ลบคะแนนเดิม แล้วบวกคะแนนใหม่
+    const tpScoreNew = old ? (tp.score - old.total + newResult.total) : (tp.score + newResult.total);
+    updateRacePlayer(target.id, { last_roll: JSON.stringify(newResult), score: tpScoreNew });
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757).setTitle('⚡ Debuff Skill!')
       .setDescription(`**${interaction.user.username}** ใช้ Debuff Skill กับ **${target.username}**!`)
       .addFields({ name: '📊 ผลเดิม', value: old ? `~~${old.display}~~` : '—', inline: true }, { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true })] });
@@ -1595,8 +1607,23 @@ async function handleRace(interaction) {
   if (sub === 'endturn') {
     if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
-    updateRaceSession({ current_turn: session.current_turn + 1 });
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setDescription(`✅ จบเทิร์น ${session.current_turn} → เทิร์น **${session.current_turn + 1}**`)] });
+    const distCfgET = DISTANCE_CONFIG[session.distance] || DISTANCE_CONFIG['mile_medium'];
+    const turnsInPhaseET = distCfgET.turnsPerPhase[(session.current_phase - 1)] || 3;
+    const currentTurn = session.current_turn;
+    const nextTurn = currentTurn + 1;
+    // Reset last_roll ทุกคนเมื่อขึ้นเทิร์นใหม่
+    const allPlayers = getAllRacePlayers();
+    for (const p of allPlayers) { updateRacePlayer(p.user_id, { last_roll: '', zone_active: 0 }); }
+    // ถ้าเทิร์นถัดไปเกินจำนวนในเฟส ให้แจ้ง Staff กด endphase
+    if (nextTurn > turnsInPhaseET) {
+      updateRaceSession({ current_turn: nextTurn });
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757)
+        .setDescription(`✅ จบเทิร์น ${currentTurn} — **จบเฟส ${session.current_phase} แล้ว!**\nกรุณาใช้ \`/race endphase\` ครับ`)] });
+    }
+    updateRaceSession({ current_turn: nextTurn });
+    const nextNotations = ['front','pace','late','end'].map(s => s.toUpperCase() + ': \`' + getDiceNotation(s, session.current_phase, session.grade) + '\`').join(' | ');
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37)
+      .setDescription('✅ จบเทิร์น ' + currentTurn + ' → เทิร์น **' + nextTurn + '** / ' + turnsInPhaseET + '\n📋 ' + nextNotations)] });
   }
 
   if (sub === 'endphase') {
@@ -1897,9 +1924,10 @@ client.on('messageCreate', async msg => {
         }
         const result = await buildRollEmbed(parsed, parsed.tokens, username, userId);
         await msg.reply(result);
+        const updatedRacePlayer = getRacePlayer(userId);
         await msg.channel.send(
           '📊 **' + username + '** | สาย ' + racePlayer.run_style.toUpperCase() +
-          ' | คะแนนรวม: **' + (racePlayer.score + (rollResult?.total || 0)).toLocaleString() + '** | ' + zoneStatus
+          ' | คะแนนรวม: **' + (updatedRacePlayer?.score || 0).toLocaleString() + '** แต้ม | ' + zoneStatus
         ).catch(() => {});
       } catch(e) { console.error(e); }
       return;
