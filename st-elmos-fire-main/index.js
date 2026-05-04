@@ -1507,7 +1507,6 @@ async function handleRace(interaction) {
     if (!player) return interaction.reply({ content: 'ผู้เล่นยังไม่ได้ลงทะเบียนครับ', flags: 64 });
     const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
     const result = rollDiceNotation(notation);
-    if (!result) return interaction.reply({ content: `Dice notation ไม่ถูกต้องครับ: ${notation}`, flags: 64 });
     const track = TRACKS[session.track];
     let hillMsg = '';
     let baseScore = player.score;
@@ -1546,7 +1545,6 @@ async function handleRace(interaction) {
     else { updateRacePlayer(userId, { race_safes: player.race_safes - 1 }); }
     const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
     const newResult = rollDiceNotation(notation);
-    if (!newResult) return interaction.reply({ content: 'Dice notation ไม่ถูกต้องครับ', flags: 64 });
     // ลบคะแนนเดิมที่เพิ่งทอย แล้วบวกคะแนนใหม่
     const scoreWithoutOld = player.score - lastRoll.total;
     const newScore = scoreWithoutOld + newResult.total;
@@ -1567,7 +1565,6 @@ async function handleRace(interaction) {
     const penalty = count * 10;
     const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
     const newResult = rollDiceNotation(notation);
-    if (!newResult) return interaction.reply({ content: 'Dice notation ไม่ถูกต้องครับ', flags: 64 });
     const newAllOutScore = player.score + newResult.total - penalty;
     updateRacePlayer(userId, { all_out_count: count, score: newAllOutScore, last_roll: JSON.stringify(newResult) });
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757).setTitle(`💥 ${interaction.user.username} — All Out! (ครั้งที่ ${count})`)
@@ -1586,7 +1583,6 @@ async function handleRace(interaction) {
     updatePlayer(userId, { race_reroll: (mp.race_reroll ?? 1) - 1 });
     const notation = getDiceNotation(tp.run_style, session.current_phase, session.grade);
     const newResult = rollDiceNotation(notation);
-    if (!newResult) return interaction.reply({ content: 'Dice notation ไม่ถูกต้องครับ', flags: 64 });
     const old = tp.last_roll ? JSON.parse(tp.last_roll) : null;
     // ลบคะแนนเดิม แล้วบวกคะแนนใหม่
     const tpScoreNew = old ? (tp.score - old.total + newResult.total) : (tp.score + newResult.total);
@@ -1886,6 +1882,16 @@ const client = new Client({
 client.once('clientReady', async () => {
   console.log(`${BOTNAME} v7.0 online: ${client.user.tag}`);
   await deployCommands();
+  // Grant Dance with the Wind to owner
+  try {
+    const _ownerId = '1243249948766502992';
+    const _existing = db.prepare('SELECT 1 FROM owned_bundles WHERE user_id = ? AND bundle_id = ?').get(_ownerId, 'dance_with_the_wind');
+    if (!_existing) {
+      db.prepare('INSERT OR IGNORE INTO players (user_id, gold, rc, streak, inv_reroll) VALUES (?, 0, 0, 0, 0)').run(_ownerId);
+      db.prepare('INSERT OR IGNORE INTO owned_bundles (user_id, bundle_id) VALUES (?, ?)').run(_ownerId, 'dance_with_the_wind');
+      console.log('Dance with the Wind granted to owner');
+    }
+  } catch(e) { console.error('owner grant error:', e.message); }
 });
 
 client.on('messageCreate', async msg => {
