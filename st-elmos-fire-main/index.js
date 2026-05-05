@@ -962,8 +962,8 @@ async function generateInventoryCard(player, username, page = 1, member = null) 
       // Band labels
       const drawBand = (label, color, y) => {
         ctx.fillStyle=color; ctx.fillRect(0,y,W,20);
-        ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle=`rgba(${hexToRgb(color.replace(/[^,]+,/,'').slice(0,-1).replace(/rgba?\(/,'').split(',')[0].trim(),hexToRgb(color.replace(/[^,]+,/,'').slice(0,-1).replace(/rgba?\(/,'').split(',')[1]||'26',hexToRgb(color.replace(/[^,]+,/,'').slice(0,-1).replace(/rgba?\(/,'').split(',')[2]||'20')}.r}...`; // simplified
-        ctx.fillStyle='rgba(26,20,16,0.22)'; ctx.textAlign='center';
+        ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.22)'; ctx.textAlign='center';
+        ctx.fillText(label, W/2, y+13); ctx.textAlign='left';
         ctx.fillText(label, W/2, y+13); ctx.textAlign='left';
       };
 
