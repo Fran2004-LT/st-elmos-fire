@@ -955,6 +955,8 @@ async function generateInventoryCard(player, username, page = 1, member = null) 
       ctx.fillText(`STREAK · ${player.streak}`, W - 14, 28); ctx.textAlign='left';
 
       // Rows
+      // Fill cream background
+      ctx.fillStyle = cream; ctx.fillRect(0, 50, W, H - 84);
       let rowY = 50;
       drawRow('GOLD', y => { ctx.font=`bold 18px ${CANVAS_FONT}`; ctx.fillStyle='#7a5c10'; ctx.fillText(player.gold.toLocaleString(), 152, y+26); }, rowY); rowY+=36;
       drawRow('RAINBOW COIN', y => { ctx.font=`bold 18px ${CANVAS_FONT}`; ctx.fillStyle='#1e4a80'; ctx.fillText(player.rc.toLocaleString(), 152, y+26); }, rowY); rowY+=36;
@@ -967,13 +969,6 @@ async function generateInventoryCard(player, username, page = 1, member = null) 
         if(fw2>0){ctx.fillStyle='#7a5c10';ctx.fillRect(bx2,by3,fw2,4);}
       }, rowY); rowY+=36;
 
-      // Band labels
-      const drawBand = (label, color, y) => {
-        ctx.fillStyle=color; ctx.fillRect(0,y,W,20);
-        ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.22)'; ctx.textAlign='center';
-        ctx.fillText(label, W/2, y+13); ctx.textAlign='left';
-        ctx.fillText(label, W/2, y+13); ctx.textAlign='left';
-      };
 
       // Economy band
       ctx.fillStyle='rgba(26,20,16,0.05)'; ctx.fillRect(0,rowY,W,20);
