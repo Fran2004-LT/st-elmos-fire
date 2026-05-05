@@ -672,10 +672,574 @@ async function generateInventoryCard(player, username, page = 1, member = null) 
   const isUma2     = roles ? (roles.has(UMA_OFFICIAL_ID) || roles.has(UMA_OC_ID)) : false;
   const isTrainer2 = roles ? roles.has(TRAINER_ROLE_ID) : false;
   const isBoth2    = isUma2 && isTrainer2;
-  const baseH = isSpecial ? 320 : 265;
-  const raceH  = (isUma2 || !isTrainer2) ? 70 : 0;
-  const trainH = isTrainer2 ? 70 : 0;
-  const H = page === 1 ? (baseH + raceH + trainH) : 280;
+  // Dynamic height
+  const roles2p = member?.roles?.cache;
+  const isUma2p     = roles2p ? (roles2p.has(UMA_OFFICIAL_ID) || roles2p.has(UMA_OC_ID)) : false;
+  const isTrainer2p = roles2p ? roles2p.has(TRAINER_ROLE_ID) : false;
+  const isGallopBundle = bundle?.collection === 'gallop';
+  let H;
+  if (page !== 1) {
+    H = 280;
+  } else if (isGallopBundle) {
+    // Scorecard: header50 + gold36 + rc36 + win36 + eco(20+44) + race(20+44 if uma) + train(20+44 if trainer) + footer34
+    const raceRows = (isUma2p || !isTrainer2p) ? 128 : 0;
+    const trainRows = isTrainer2p ? 64 : 0;
+    H = 50 + 36 + 36 + 36 + 64 + raceRows + trainRows + 34;
+  } else {
+    // Horizontal split: always same width left col, right col grows
+    const raceRows2 = (isUma2p || !isTrainer2p) ? 54 : 0;
+    const trainRows2 = isTrainer2p ? 54 : 0;
+    H = Math.max(300, 14 + 54 + 14 + 26 + 20 + 54 + 54 + raceRows2 + trainRows2 + 34 + 20);
+  }
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  const ec = hexToRgb(emblemColor);
+
+  // Background
+  drawBackground(ctx, W, H, bgType, emblemColor);
+
+  // Character image (for bundles with hasCharImg)
+  if (bundle?.hasCharImg && bundleKey === 'dance_with_the_wind') {
+    try {
+      const { loadImage } = await import('canvas');
+      const imgSrc = page === 1 ? DWTW_ECO_IMG : DWTW_PRO_IMG;
+      const charImg = await loadImage(imgSrc);
+      const charH = H;
+      const charW = Math.round(charImg.width * charH / charImg.height);
+      ctx.globalAlpha = page === 1 ? 0.18 : 0.32;
+      ctx.drawImage(charImg, W - charW + 20, 0, charW, charH);
+      ctx.globalAlpha = 1.0;
+    } catch(e) {}
+  }
+
+  // Border
+  drawRoundRect(ctx, 0.5, 0.5, W-1, H-1, 12);
+  ctx.strokeStyle = `rgba(${ec.r},${ec.g},${ec.b},0.3)`;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Top strip
+  const strip = ctx.createLinearGradient(0, 0, W, 0);
+  strip.addColorStop(0, emblemColor);
+  strip.addColorStop(0.5, isLight ? '#aaaaaa' : '#ffffff');
+  strip.addColorStop(1, emblemColor);
+  ctx.fillStyle = strip;
+  ctx.fillRect(0, 0, W, 3);
+
+  const textColor = isLight ? '#1a1a1a' : '#f0f0f0';
+  const dimColor = isLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)';
+  const dimColor2 = isLight ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.3)';
+  const boxBg = isLight ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.04)';
+  const boxBorder = isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.07)';
+
+  const isGallop = bundle?.collection === 'gallop';
+  const isSpecialBundle = bundle?.isSpecial === true && bundleKey !== 'dance_with_the_wind';
+
+  const drawSectionDivider = (ctx2, y, label, color) => {
+    ctx2.fillStyle = color;
+    ctx2.fillRect(20, y, W - 40, 1);
+    ctx2.font = `8px ${CANVAS_FONT}`;
+    ctx2.fillStyle = color;
+    ctx2.textAlign = 'center';
+    ctx2.fillText(label, W / 2, y - 4);
+    ctx2.textAlign = 'left';
+  };
+
+  const drawItemBox = (ctx2, x, y, w, h, val, label, bgFill, strokeClr, valClr) => {
+    ctx2.fillStyle = bgFill;
+    drawRoundRect(ctx2, x, y, w, h, 6);
+    ctx2.fill();
+    ctx2.strokeStyle = strokeClr;
+    ctx2.lineWidth = 1;
+    ctx2.stroke();
+    ctx2.font = `bold 16px ${CANVAS_FONT}`;
+    ctx2.fillStyle = valClr;
+    ctx2.fillText(val, x + 10, y + 26);
+    ctx2.font = `7px ${CANVAS_FONT}`;
+    ctx2.fillStyle = dimColor2;
+    ctx2.fillText(label, x + 10, y + 38);
+  };
+
+  if (page === 1) {
+    // ══════════════════════════════════════════════
+    //  PAGE 1: ECONOMY
+    //  Special Bundle → Design A (Horizontal Split, dark)
+    //  Gallop → Design B (Scorecard, white/cream)
+    //  Dance with the Wind → Design A with char image
+    // ══════════════════════════════════════════════
+    const roles2 = member?.roles?.cache;
+    const isUma     = roles2 ? (roles2.has(UMA_OFFICIAL_ID) || roles2.has(UMA_OC_ID)) : false;
+    const isTrainer = roles2 ? roles2.has(TRAINER_ROLE_ID) : false;
+    const ownedBundleCount = db.prepare('SELECT COUNT(*) as cnt FROM owned_bundles WHERE user_id = ?').get(player.user_id)?.cnt || 0;
+
+    if (!isGallop) {
+      // ── DESIGN A: HORIZONTAL SPLIT (Special Bundle + default) ──
+      // Left gutter bar
+      const ec2 = ec;
+      ctx.fillStyle = emblemColor;
+      ctx.fillRect(0, 0, 4, H);
+
+      // Left column background
+      ctx.fillStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.03)`;
+      ctx.fillRect(4, 0, 186, H);
+      ctx.fillStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.1)`;
+      ctx.fillRect(190, 0, 1, H);
+
+      // Avatar
+      ctx.fillStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.15)`;
+      drawRoundRect(ctx, 14, 14, 36, 36, 6);
+      ctx.fill();
+      ctx.strokeStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.35)`;
+      ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = emblemColor;
+      ctx.font = `bold 18px ${CANVAS_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(username.charAt(0).toUpperCase(), 32, 38);
+      ctx.textAlign = 'left';
+
+      // Name + bundle
+      ctx.fillStyle = textColor;
+      ctx.font = `bold 13px ${CANVAS_FONT}`;
+      ctx.fillText(username, 14, 68);
+      ctx.fillStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.55)`;
+      ctx.font = `7px ${CANVAS_FONT}`;
+      ctx.fillText(`✦ ${bundleName}`, 14, 80);
+
+      // Streak
+      ctx.fillStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.8)`;
+      ctx.font = `bold 11px ${CANVAS_FONT}`;
+      ctx.textAlign = 'right';
+      ctx.fillText(`STREAK · ${player.streak}`, W - 14, 24);
+      ctx.textAlign = 'left';
+
+      // Left col stats
+      const statY = 100;
+      const stats = [
+        { label: 'GOLD', val: player.gold.toLocaleString(), color: '#E8CC80' },
+        { label: 'RAINBOW COIN', val: player.rc.toLocaleString(), color: '#90C8FF' },
+        { label: 'STREAK', val: `${player.streak}/7`, color: `rgba(${ec2.r},${ec2.g},${ec2.b},0.7)` },
+      ];
+      stats.forEach((s, i) => {
+        const sy = statY + i * 40;
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        drawRoundRect(ctx, 10, sy, 174, 32, 4);
+        ctx.fill();
+        ctx.font = `6px ${CANVAS_FONT}`;
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.fillText(s.label, 16, sy + 12);
+        ctx.font = `bold 14px ${CANVAS_FONT}`;
+        ctx.fillStyle = s.color;
+        ctx.fillText(s.val, 16, sy + 26);
+      });
+
+      // Win today bar
+      const wY = statY + 3 * 40 + 4;
+      ctx.fillStyle = 'rgba(255,255,255,0.03)';
+      drawRoundRect(ctx, 10, wY, 174, 26, 4);
+      ctx.fill();
+      ctx.font = `6px ${CANVAS_FONT}`;
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.fillText('WIN TODAY', 16, wY + 11);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.55)`;
+      ctx.fillText(`${player.win_today.toLocaleString()} / ${WIN_CAP.toLocaleString()}`, 178, wY + 11);
+      ctx.textAlign = 'left';
+      const bw = 160, bx = 14, by2 = wY + 17;
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      drawRoundRect(ctx, bx, by2, bw, 3, 1); ctx.fill();
+      const fw = Math.min(bw, (player.win_today / WIN_CAP) * bw);
+      if (fw > 0) { const g = ctx.createLinearGradient(bx,0,bx+fw,0); g.addColorStop(0,emblemColor); g.addColorStop(1,'#ccc'); ctx.fillStyle=g; drawRoundRect(ctx,bx,by2,fw,3,1); ctx.fill(); }
+
+      // Streak dots
+      const dotBaseY = wY + 32;
+      for (let i = 0; i < 7; i++) {
+        const dx = 14 + i * 24, dy = dotBaseY;
+        const done = i < player.streak, today = i === player.streak - 1;
+        ctx.beginPath(); ctx.arc(dx, dy, 8, 0, Math.PI*2);
+        ctx.fillStyle = today ? `rgba(${ec2.r},${ec2.g},${ec2.b},0.25)` : done ? `rgba(${ec2.r},${ec2.g},${ec2.b},0.1)` : 'rgba(255,255,255,0.04)';
+        ctx.fill();
+        ctx.strokeStyle = today ? emblemColor : done ? `rgba(${ec2.r},${ec2.g},${ec2.b},0.4)` : 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.font = `7px ${CANVAS_FONT}`; ctx.textAlign = 'center';
+        ctx.fillStyle = done ? emblemColor : dimColor2;
+        ctx.fillText(today ? '★' : done ? '✓' : `${i+1}`, dx, dy + 3);
+        ctx.textAlign = 'left';
+      }
+
+      // Right column items
+      const rcX = 198, rcW = W - rcX - 10;
+      let ry = 14;
+
+      // Economy section
+      const secColor = `rgba(${ec2.r},${ec2.g},${ec2.b},0.35)`;
+      ctx.fillStyle = secColor; ctx.fillRect(rcX, ry, rcW, 1);
+      ctx.font = `7px ${CANVAS_FONT}`; ctx.fillStyle = secColor; ctx.textAlign = 'center';
+      ctx.fillText('ECONOMY', rcX + rcW/2, ry - 4); ctx.textAlign = 'left';
+      ry += 8;
+      const eW2 = (rcW - 6) / 2;
+      drawItemBox(ctx, rcX, ry, eW2, 44, `${player.inv_reroll||0}`, 'RE-ROLL', 'rgba(255,255,255,0.03)', 'rgba(255,255,255,0.07)', textColor);
+      drawItemBox(ctx, rcX + eW2 + 6, ry, eW2, 44, `${ownedBundleCount}`, 'BUNDLES', 'rgba(255,255,255,0.03)', 'rgba(255,255,255,0.07)', textColor);
+      ry += 54;
+
+      // Race section
+      if (isUma || !isTrainer) {
+        ctx.fillStyle = 'rgba(239,68,68,0.2)'; ctx.fillRect(rcX, ry, rcW, 1);
+        ctx.font = `7px ${CANVAS_FONT}`; ctx.fillStyle = 'rgba(239,68,68,0.5)'; ctx.textAlign = 'center';
+        ctx.fillText('RACE', rcX + rcW/2, ry - 4); ctx.textAlign = 'left';
+        ry += 8;
+        const rW3 = (rcW - 12) / 3;
+        drawItemBox(ctx, rcX, ry, rW3, 44, `${player.race_reroll??1}`, 'MAIN REROLL', 'rgba(239,68,68,0.07)', 'rgba(239,68,68,0.18)', '#F87171');
+        drawItemBox(ctx, rcX + rW3 + 6, ry, rW3, 44, `${player.inv_reroll||0}`, 'ONE-USE RR', 'rgba(251,191,36,0.07)', 'rgba(251,191,36,0.18)', '#FBB724');
+        drawItemBox(ctx, rcX + (rW3+6)*2, ry, rW3, 44, `${player.race_safe??0}`, 'RACE SAFE', 'rgba(59,130,246,0.07)', 'rgba(59,130,246,0.18)', '#60A5FA');
+        ry += 54;
+      }
+
+      // Trainer section
+      if (isTrainer) {
+        ctx.fillStyle = 'rgba(168,85,247,0.2)'; ctx.fillRect(rcX, ry, rcW, 1);
+        ctx.font = `7px ${CANVAS_FONT}`; ctx.fillStyle = 'rgba(168,85,247,0.5)'; ctx.textAlign = 'center';
+        ctx.fillText('TRAINER', rcX + rcW/2, ry - 4); ctx.textAlign = 'left';
+        ry += 8;
+        drawItemBox(ctx, rcX, ry, rcW, 44, `${player.trainer_reroll??0}`, 'REROLL TRAINER', 'rgba(168,85,247,0.07)', 'rgba(168,85,247,0.18)', '#A855F7');
+        ry += 54;
+      }
+
+      // Footer
+      const footerY2 = H - 34;
+      ctx.fillStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.12)`;
+      ctx.fillRect(20, footerY2, W - 40, 1);
+      ctx.fillStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.1)`;
+      drawRoundRect(ctx, 20, footerY2 + 8, 72, 20, 4); ctx.fill();
+      ctx.strokeStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.35)`; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = emblemColor; ctx.font = `bold 9px ${CANVAS_FONT}`;
+      ctx.fillText('Economy', 30, footerY2 + 22);
+      ctx.fillStyle = 'rgba(255,255,255,0.03)';
+      drawRoundRect(ctx, 98, footerY2 + 8, 60, 20, 4); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = dimColor; ctx.font = `9px ${CANVAS_FONT}`;
+      ctx.fillText('Profile', 108, footerY2 + 22);
+      ctx.textAlign = 'right'; ctx.fillStyle = `rgba(${ec2.r},${ec2.g},${ec2.b},0.2)`;
+      ctx.font = `9px ${CANVAS_FONT}`; ctx.fillText("St. Elmo's Fire", W - 20, footerY2 + 22);
+      ctx.textAlign = 'left';
+
+    } else {
+      // ── DESIGN B: SCORECARD (Gallop Collection) ──
+      const cream = '#f2ede4', darkInk = '#1a1410';
+      const drawRow = (label, valFn, y) => {
+        ctx.fillStyle = `rgba(26,20,16,0.04)`; ctx.fillRect(0, y, 145, 36);
+        ctx.fillStyle = `rgba(26,20,16,0.12)`; ctx.fillRect(145, y, 1, 36); ctx.fillRect(0, y+36, W, 1);
+        ctx.font = `7px ${CANVAS_FONT}`; ctx.fillStyle = 'rgba(26,20,16,0.28)'; ctx.fillText(label, 10, y + 22);
+        valFn(y);
+      };
+
+      // Header band
+      ctx.fillStyle = darkInk; ctx.fillRect(0, 0, W, 50);
+      ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.15)`;
+      drawRoundRect(ctx, 10, 7, 36, 36, 4); ctx.fill();
+      ctx.strokeStyle = `rgba(${ec.r},${ec.g},${ec.b},0.35)`; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle = emblemColor; ctx.font = `bold 18px ${CANVAS_FONT}`; ctx.textAlign='center';
+      ctx.fillText(username.charAt(0).toUpperCase(), 28, 32); ctx.textAlign='left';
+      ctx.fillStyle = emblemColor; ctx.font = `bold 16px ${CANVAS_FONT}`;
+      ctx.fillText(username, 54, 26);
+      ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.45)`; ctx.font = `7px ${CANVAS_FONT}`;
+      ctx.fillText(`✦ ${bundleName}`, 54, 40);
+      ctx.fillStyle = emblemColor; ctx.font = `bold 12px ${CANVAS_FONT}`; ctx.textAlign='right';
+      ctx.fillText(`STREAK · ${player.streak}`, W - 14, 28); ctx.textAlign='left';
+
+      // Rows
+      let rowY = 50;
+      drawRow('GOLD', y => { ctx.font=`bold 18px ${CANVAS_FONT}`; ctx.fillStyle='#7a5c10'; ctx.fillText(player.gold.toLocaleString(), 152, y+26); }, rowY); rowY+=36;
+      drawRow('RAINBOW COIN', y => { ctx.font=`bold 18px ${CANVAS_FONT}`; ctx.fillStyle='#1e4a80'; ctx.fillText(player.rc.toLocaleString(), 152, y+26); }, rowY); rowY+=36;
+      drawRow('WIN TODAY', y => {
+        const bw2=W-160, bx2=152, by3=y+16;
+        ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.28)';
+        ctx.fillText(`${player.win_today.toLocaleString()} / ${WIN_CAP.toLocaleString()}`, 152, y+14);
+        ctx.fillStyle='rgba(26,20,16,0.1)'; ctx.fillRect(bx2,by3,bw2,4);
+        const fw2=Math.min(bw2,(player.win_today/WIN_CAP)*bw2);
+        if(fw2>0){ctx.fillStyle='#7a5c10';ctx.fillRect(bx2,by3,fw2,4);}
+      }, rowY); rowY+=36;
+
+      // Band labels
+      const drawBand = (label, color, y) => {
+        ctx.fillStyle=color; ctx.fillRect(0,y,W,20);
+        ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle=`rgba(${hexToRgb(color.replace(/[^,]+,/,'').slice(0,-1).replace(/rgba?\(/,'').split(',')[0].trim(),hexToRgb(color.replace(/[^,]+,/,'').slice(0,-1).replace(/rgba?\(/,'').split(',')[1]||'26',hexToRgb(color.replace(/[^,]+,/,'').slice(0,-1).replace(/rgba?\(/,'').split(',')[2]||'20')}.r}...`; // simplified
+        ctx.fillStyle='rgba(26,20,16,0.22)'; ctx.textAlign='center';
+        ctx.fillText(label, W/2, y+13); ctx.textAlign='left';
+      };
+
+      // Economy band
+      ctx.fillStyle='rgba(26,20,16,0.05)'; ctx.fillRect(0,rowY,W,20);
+      ctx.fillStyle='rgba(26,20,16,0.2)'; ctx.textAlign='center'; ctx.font=`7px ${CANVAS_FONT}`;
+      ctx.fillText('ECONOMY', W/2, rowY+13); ctx.textAlign='left'; rowY+=20;
+
+      const drawGallopItemRow = (items, y) => {
+        const iw = (W - 2*(items.length-1)) / items.length;
+        ctx.fillStyle='rgba(26,20,16,0.08)'; ctx.fillRect(0,y+items.reduce(()=>44,44),W,1);
+        items.forEach((item,i)=>{
+          const ix=i*(iw+2);
+          if(i>0){ctx.fillStyle='rgba(26,20,16,0.08)';ctx.fillRect(ix,y,1,44);}
+          ctx.font=`bold 22px ${CANVAS_FONT}`; ctx.fillStyle=item.color||darkInk;
+          ctx.fillText(item.val, ix+12, y+30);
+          ctx.font=`6px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.28)';
+          ctx.fillText(item.label, ix+12, y+42);
+        });
+      };
+
+      drawGallopItemRow([{val:`${player.inv_reroll||0}`,label:'RE-ROLL'},{val:`${ownedBundleCount}`,label:'BUNDLES'},{val:`${player.streak}/7`,label:'STREAK'}], rowY); rowY+=44;
+
+      if(isUma||!isTrainer){
+        ctx.fillStyle='rgba(180,30,30,0.06)'; ctx.fillRect(0,rowY,W,20);
+        ctx.fillStyle='rgba(180,30,30,0.4)'; ctx.textAlign='center'; ctx.font=`7px ${CANVAS_FONT}`;
+        ctx.fillText('RACE',W/2,rowY+13); ctx.textAlign='left'; rowY+=20;
+        drawGallopItemRow([{val:`${player.race_reroll??1}`,label:'MAIN REROLL',color:'#b41e1e'},{val:`${player.inv_reroll||0}`,label:'ONE-USE RR',color:'#7a5c10'},{val:`${player.race_safe??0}`,label:'RACE SAFE',color:'#1e4a80'}],rowY); rowY+=44;
+      }
+
+      if(isTrainer){
+        ctx.fillStyle='rgba(100,50,180,0.06)'; ctx.fillRect(0,rowY,W,20);
+        ctx.fillStyle='rgba(100,50,180,0.4)'; ctx.textAlign='center'; ctx.font=`7px ${CANVAS_FONT}`;
+        ctx.fillText('TRAINER',W/2,rowY+13); ctx.textAlign='left'; rowY+=20;
+        drawGallopItemRow([{val:`${player.trainer_reroll??0}`,label:'REROLL TRAINER',color:'#5c2fa0'}],rowY); rowY+=44;
+      }
+
+      // Footer band
+      ctx.fillStyle=darkInk; ctx.fillRect(0,rowY,W,34);
+      ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.15)`;
+      drawRoundRect(ctx,10,rowY+7,72,20,3); ctx.fill();
+      ctx.strokeStyle=`rgba(${ec.r},${ec.g},${ec.b},0.4)`; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle=emblemColor; ctx.font=`bold 9px ${CANVAS_FONT}`;
+      ctx.fillText('Economy',20,rowY+21);
+      ctx.fillStyle='rgba(255,255,255,0.06)';
+      drawRoundRect(ctx,88,rowY+7,60,20,3); ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.font=`9px ${CANVAS_FONT}`;
+      ctx.fillText('Profile',98,rowY+21);
+      ctx.textAlign='right'; ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.font=`9px ${CANVAS_FONT}`;
+      ctx.fillText("St. Elmo's Fire",W-14,rowY+21); ctx.textAlign='left';
+    }
+
+  } else {
+    // ══════════════════════════════════════════════
+    //  PAGE 2: PROFILE
+    //  Special Bundle → Style B (Scorecard, white/cream)
+    //  Gallop → Style A (Horizontal Split, dark)
+    // ══════════════════════════════════════════════
+    const profile = getProfile(player.user_id);
+    const charName = profile.char_name || '—';
+    const teamStr = profile.team_name ? `${profile.team_name}${profile.trainer_name ? ' — '+profile.trainer_name : ''}` : 'ยังไม่ได้ตั้งค่า';
+    const showcases = [
+      { race: profile.showcase_1_race, rank: profile.showcase_1_rank, grade: profile.showcase_1_grade, year: profile.showcase_1_year },
+      { race: profile.showcase_2_race, rank: profile.showcase_2_rank, grade: profile.showcase_2_grade, year: profile.showcase_2_year },
+      { race: profile.showcase_3_race, rank: profile.showcase_3_rank, grade: profile.showcase_3_grade, year: profile.showcase_3_year },
+    ];
+    const rankColor = (rank) => { if(!rank)return dimColor2; if(rank.includes('1'))return'#FFD700'; if(rank.includes('2'))return'#C0C0C0'; return'#CD7F32'; };
+
+    if (!isGallop) {
+      // ── STYLE B: SCORECARD (Special Bundle Profile) ──
+      const darkInk2 = '#1a1410';
+
+      // Character image
+      if (bundle?.hasCharImg && bundleKey === 'dance_with_the_wind') {
+        try {
+          const { loadImage } = await import('canvas');
+          const charImg = await loadImage(DWTW_PRO_IMG);
+          const charH2 = H;
+          const charW2 = Math.round(charImg.width * charH2 / charImg.height);
+          ctx.globalAlpha = 0.25;
+          ctx.drawImage(charImg, W - charW2, 0, charW2, charH2);
+          ctx.globalAlpha = 1.0;
+        } catch(e) {}
+      }
+
+      // Header band (dark)
+      ctx.fillStyle = darkInk2; ctx.fillRect(0, 0, W, 50);
+      ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.15)`;
+      drawRoundRect(ctx, 10, 7, 36, 36, 4); ctx.fill();
+      ctx.strokeStyle = `rgba(${ec.r},${ec.g},${ec.b},0.35)`; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle = emblemColor; ctx.font=`bold 18px ${CANVAS_FONT}`; ctx.textAlign='center';
+      ctx.fillText(username.charAt(0).toUpperCase(), 28, 32); ctx.textAlign='left';
+      ctx.fillStyle = emblemColor; ctx.font=`bold 16px ${CANVAS_FONT}`; ctx.fillText(username, 54, 26);
+      ctx.fillStyle = `rgba(${ec.r},${ec.g},${ec.b},0.45)`; ctx.font=`7px ${CANVAS_FONT}`;
+      ctx.fillText(`✦ ${bundleName}`, 54, 40);
+      ctx.fillStyle = emblemColor; ctx.font=`bold 12px ${CANVAS_FONT}`; ctx.textAlign='right';
+      ctx.fillText(`STREAK · ${player.streak}`, W-14, 28); ctx.textAlign='left';
+
+      // Body rows
+      ctx.fillStyle='rgba(26,20,16,0.07)'; ctx.fillRect(0,50,W,1);
+      const bodyBg = '#f2ede4'; // cream
+      ctx.fillStyle=bodyBg; ctx.fillRect(0,50,W,H-84);
+
+      // Char name + team
+      ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.28)';
+      ctx.fillText('CHARACTER', 14, 68);
+      ctx.font=`bold 22px ${CANVAS_FONT}`; ctx.fillStyle=darkInk2;
+      ctx.fillText(charName, 14, 92);
+      ctx.font=`8px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.4)';
+      ctx.fillText(teamStr, 14, 108);
+
+      // Divider with gradient color
+      const grad = ctx.createLinearGradient(14,0,W-14,0);
+      grad.addColorStop(0, emblemColor); grad.addColorStop(0.6,'rgba(212,175,55,0.5)'); grad.addColorStop(1,'rgba(26,20,16,0.05)');
+      ctx.fillStyle=grad; ctx.fillRect(14,116,W-28,1);
+
+      // Showcase title
+      ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.28)'; ctx.fillText('RACE SHOWCASE', 14, 130);
+
+      // Pods — scorecard rows style
+      const podY2 = 138, podH2 = 40, podW2 = (W-28)/3;
+      // 2nd | 1st | 3rd
+      [1,0,2].forEach((si,pi) => {
+        const s = showcases[si];
+        const px2 = 14 + pi*(podW2+6);
+        const rc2 = rankColor(s.rank);
+        const rc2Rgb = hexToRgb(rc2 === dimColor2 ? '#888' : rc2);
+        ctx.fillStyle=`rgba(255,255,255,0.55)`; ctx.fillRect(px2,podY2,podW2,podH2);
+        ctx.strokeStyle=`rgba(${rc2Rgb.r},${rc2Rgb.g},${rc2Rgb.b},0.25)`; ctx.lineWidth=1;
+        ctx.strokeRect(px2,podY2,podW2,podH2);
+        if(s.race){
+          ctx.font=`bold 18px ${CANVAS_FONT}`; ctx.fillStyle=rc2 === '#FFD700' ? '#8B6914' : rc2 === '#C0C0C0' ? 'rgba(26,20,16,0.4)' : '#7a4010';
+          ctx.fillText(s.rank||'—', px2+8, podY2+24);
+          ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.5)';
+          ctx.fillText(s.race.length>18?s.race.slice(0,17)+'…':s.race, px2+8, podY2+36);
+        } else {
+          ctx.font=`18px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.1)';
+          ctx.fillText('—', px2+8, podY2+24);
+          ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.15)';
+          ctx.fillText('Empty', px2+8, podY2+36);
+        }
+      });
+
+      // Footer
+      const fY2 = H-34;
+      ctx.fillStyle=darkInk2; ctx.fillRect(0,fY2,W,34);
+      ctx.fillStyle='rgba(255,255,255,0.06)';
+      drawRoundRect(ctx,10,fY2+7,72,20,3); ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.font=`9px ${CANVAS_FONT}`;
+      ctx.fillText('Economy',20,fY2+21);
+      ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.15)`;
+      drawRoundRect(ctx,88,fY2+7,60,20,3); ctx.fill();
+      ctx.strokeStyle=`rgba(${ec.r},${ec.g},${ec.b},0.4)`; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle=emblemColor; ctx.font=`bold 9px ${CANVAS_FONT}`;
+      ctx.fillText('Profile',98,fY2+21);
+      ctx.textAlign='right'; ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.font=`9px ${CANVAS_FONT}`;
+      ctx.fillText("St. Elmo's Fire",W-14,fY2+21); ctx.textAlign='left';
+
+    } else {
+      // ── STYLE A: HORIZONTAL SPLIT (Gallop Profile) ──
+      // Left gutter
+      ctx.fillStyle=emblemColor; ctx.fillRect(0,0,4,H);
+      ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.03)`; ctx.fillRect(4,0,186,H);
+      ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.1)`; ctx.fillRect(190,0,1,H);
+
+      // Avatar + name
+      ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.12)`;
+      drawRoundRect(ctx,14,14,36,36,6); ctx.fill();
+      ctx.strokeStyle=`rgba(${ec.r},${ec.g},${ec.b},0.3)`; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle=emblemColor; ctx.font=`bold 18px ${CANVAS_FONT}`; ctx.textAlign='center';
+      ctx.fillText(username.charAt(0).toUpperCase(),32,38); ctx.textAlign='left';
+      ctx.fillStyle=textColor; ctx.font=`bold 13px ${CANVAS_FONT}`; ctx.fillText(username,14,68);
+      ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.5)`; ctx.font=`7px ${CANVAS_FONT}`;
+      ctx.fillText(`✦ ${bundleName}`,14,80);
+      ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.8)`; ctx.font=`bold 11px ${CANVAS_FONT}`; ctx.textAlign='right';
+      ctx.fillText(`STREAK · ${player.streak}`,W-14,24); ctx.textAlign='left';
+
+      // Left col: char info
+      const infos = [
+        { label:'CHARACTER', val: charName },
+        { label:'TEAM/TRAINER', val: teamStr.length>20?teamStr.slice(0,19)+'…':teamStr },
+      ];
+      let infoY = 100;
+      infos.forEach(inf => {
+        ctx.font=`6px ${CANVAS_FONT}`; ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.fillText(inf.label,14,infoY);
+        ctx.font=`bold 12px ${CANVAS_FONT}`; ctx.fillStyle=textColor; ctx.fillText(inf.val,14,infoY+14);
+        infoY+=28;
+      });
+
+      // Right col: showcase
+      const rcX2=198, rcW2=W-rcX2-10;
+      ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.35)`; ctx.fillRect(rcX2,14,rcW2,1);
+      ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.35)`; ctx.textAlign='center';
+      ctx.fillText('RACE SHOWCASE',rcX2+rcW2/2,10); ctx.textAlign='left';
+
+      // Pods
+      const gPodH=70, gPodW=rcW2;
+      [1,0,2].forEach((si,pi) => {
+        const s=showcases[si];
+        const py2=22+pi*(gPodH+6);
+        const rc3=rankColor(s.rank);
+        const rc3Rgb=hexToRgb(rc3===dimColor2?'#888':rc3);
+        ctx.fillStyle=`rgba(${rc3Rgb.r},${rc3Rgb.g},${rc3Rgb.b},0.05)`;
+        drawRoundRect(ctx,rcX2,py2,gPodW,gPodH,4); ctx.fill();
+        ctx.strokeStyle=`rgba(${rc3Rgb.r},${rc3Rgb.g},${rc3Rgb.b},0.18)`; ctx.lineWidth=1; ctx.stroke();
+        if(s.race){
+          ctx.font=`bold 20px ${CANVAS_FONT}`; ctx.fillStyle=rc3;
+          ctx.fillText(s.rank||'—',rcX2+8,py2+28);
+          ctx.font=`8px ${CANVAS_FONT}`; ctx.fillStyle=textColor;
+          ctx.fillText(s.race.length>22?s.race.slice(0,21)+'…':s.race,rcX2+8,py2+44);
+          ctx.font=`7px ${CANVAS_FONT}`; ctx.fillStyle=dimColor2;
+          ctx.fillText(`${s.grade}·${s.year}`,rcX2+8,py2+58);
+        } else {
+          ctx.font=`20px ${CANVAS_FONT}`; ctx.fillStyle=`rgba(${rc3Rgb.r},${rc3Rgb.g},${rc3Rgb.b},0.15)`;
+          ctx.fillText('—',rcX2+8,py2+28);
+          ctx.font=`8px ${CANVAS_FONT}`; ctx.fillStyle='rgba(255,255,255,0.12)';
+          ctx.fillText('Empty',rcX2+8,py2+44);
+        }
+      });
+
+      // Footer
+      const fY3=H-34;
+      ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.12)`; ctx.fillRect(20,fY3,W-40,1);
+      ctx.fillStyle='rgba(255,255,255,0.03)';
+      drawRoundRect(ctx,20,fY3+8,72,20,4); ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,0.08)'; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle=dimColor; ctx.font=`9px ${CANVAS_FONT}`; ctx.fillText('Economy',30,fY3+22);
+      ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.1)`;
+      drawRoundRect(ctx,98,fY3+8,60,20,4); ctx.fill();
+      ctx.strokeStyle=`rgba(${ec.r},${ec.g},${ec.b},0.4)`; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle=emblemColor; ctx.font=`bold 9px ${CANVAS_FONT}`; ctx.fillText('Profile',108,fY3+22);
+      ctx.textAlign='right'; ctx.fillStyle=`rgba(${ec.r},${ec.g},${ec.b},0.2)`; ctx.font=`9px ${CANVAS_FONT}`;
+      ctx.fillText("St. Elmo's Fire",W-20,fY3+22); ctx.textAlign='left';
+    }
+  }
+
+  return canvas.toBuffer('image/png');
+}
+
+// ══════════════════════════════════════════════
+//  INVENTORY CARD GENERATOR
+// ══════════════════════════════════════════════
+async function generateInventoryCard(player, username, page = 1, member = null) {
+  const W = 560;
+  const bundleKey = player.equipped_bundle || 'default';
+  const bundle = getBundle(bundleKey);
+  const bgType = bundle ? bundle.bgType : 'default';
+  const emblemColor = bundle ? bundle.emblemColor : '#444444';
+  const bundleName = bundle ? bundle.name : 'Default';
+  const isLight = false; // debut และ mejiro เปลี่ยนเป็น dark แล้ว
+  const isSpecial = bundle ? bundle.isSpecial : false;
+  const roles = member?.roles?.cache;
+  const isUma2     = roles ? (roles.has(UMA_OFFICIAL_ID) || roles.has(UMA_OC_ID)) : false;
+  const isTrainer2 = roles ? roles.has(TRAINER_ROLE_ID) : false;
+  const isBoth2    = isUma2 && isTrainer2;
+  // Dynamic height
+  const roles2p = member?.roles?.cache;
+  const isUma2p     = roles2p ? (roles2p.has(UMA_OFFICIAL_ID) || roles2p.has(UMA_OC_ID)) : false;
+  const isTrainer2p = roles2p ? roles2p.has(TRAINER_ROLE_ID) : false;
+  const isGallopBundle = bundle?.collection === 'gallop';
+  let H;
+  if (page !== 1) {
+    H = 280;
+  } else if (isGallopBundle) {
+    // Scorecard: header50 + gold36 + rc36 + win36 + eco(20+44) + race(20+44 if uma) + train(20+44 if trainer) + footer34
+    const raceRows = (isUma2p || !isTrainer2p) ? 128 : 0;
+    const trainRows = isTrainer2p ? 64 : 0;
+    H = 50 + 36 + 36 + 36 + 64 + raceRows + trainRows + 34;
+  } else {
+    // Horizontal split: always same width left col, right col grows
+    const raceRows2 = (isUma2p || !isTrainer2p) ? 54 : 0;
+    const trainRows2 = isTrainer2p ? 54 : 0;
+    H = Math.max(300, 14 + 54 + 14 + 26 + 20 + 54 + 54 + raceRows2 + trainRows2 + 34 + 20);
+  }
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   const ec = hexToRgb(emblemColor);
@@ -923,7 +1487,7 @@ async function generateInventoryCard(player, username, page = 1, member = null) 
 
     // ── STREAK BOX (special bundles only) ──
     if (isSpecial) {
-      const sY = 252;
+      const sY = nextSectionY + 4;
       ctx.fillStyle = boxBg;
       drawRoundRect(ctx, 20, sY, W - 40, 46, 8);
       ctx.fill();
