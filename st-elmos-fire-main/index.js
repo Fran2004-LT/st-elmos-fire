@@ -113,6 +113,14 @@ const SPECIAL_BUNDLES = {
     isSpecial: true,
     g1: true,
   },
+  dance_with_the_wind: {
+    name: 'Dance with the Wind',
+    type: 'special',
+    emblemColor: '#2E7D32',  // เขียว
+    bgType: 'debut',
+    isSpecial: true,
+    hasCharImg: true,
+  },
 };
 
 // Gallop collection (ขาย — 2,500 RC)
@@ -973,15 +981,15 @@ async function generateInventoryCard(player, username, page = 1, member = null) 
       ctx.fillText('ECONOMY', W/2, rowY+13); ctx.textAlign='left'; rowY+=20;
 
       const drawGallopItemRow = (items, y) => {
-        const iw = (W - 2*(items.length-1)) / items.length;
-        ctx.fillStyle='rgba(26,20,16,0.08)'; ctx.fillRect(0,y+items.reduce(()=>44,44),W,1);
-        items.forEach((item,i)=>{
-          const ix=i*(iw+2);
-          if(i>0){ctx.fillStyle='rgba(26,20,16,0.08)';ctx.fillRect(ix,y,1,44);}
-          ctx.font=`bold 22px ${CANVAS_FONT}`; ctx.fillStyle=item.color||darkInk;
-          ctx.fillText(item.val, ix+12, y+30);
-          ctx.font=`6px ${CANVAS_FONT}`; ctx.fillStyle='rgba(26,20,16,0.28)';
-          ctx.fillText(item.label, ix+12, y+42);
+        const iw = (W - (items.length-1)) / items.length;
+        ctx.fillStyle='rgba(26,20,16,0.06)'; ctx.fillRect(0, y+44, W, 1);
+        items.forEach((item, i) => {
+          const ix = i * (iw + 1);
+          if (i > 0) { ctx.fillStyle='rgba(26,20,16,0.08)'; ctx.fillRect(ix, y, 1, 44); }
+          ctx.font = `bold 22px ${CANVAS_FONT}`; ctx.fillStyle = item.color || '#1a1410';
+          ctx.fillText(item.val, ix + 12, y + 30);
+          ctx.font = `6px ${CANVAS_FONT}`; ctx.fillStyle = 'rgba(26,20,16,0.28)';
+          ctx.fillText(item.label, ix + 12, y + 42);
         });
       };
 
