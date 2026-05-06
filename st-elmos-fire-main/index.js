@@ -1472,10 +1472,10 @@ function clearRaceSession() {
 }
 
 function rollDiceNotation(notation) {
-  const m = notation.toLowerCase().match(/^(\d+)d(\d+)(?:(kh|kl)(\d+))?$/);
+  const m = notation.toLowerCase().match(/^(\d*)d(\d+)(?:(kh|kl)(\d+))?$/);
   if (!m) return null;
   const [, n, sides, mode, keep] = m;
-  const num = parseInt(n), s = parseInt(sides), k = keep ? parseInt(keep) : num;
+  const num = n ? parseInt(n) : 1, s = parseInt(sides), k = keep ? parseInt(keep) : num;
   const rolls = Array.from({ length: num }, () => Math.floor(Math.random() * s) + 1);
   let chosen, rest;
   if (mode === 'kh') { const sorted = [...rolls].sort((a,b) => b-a); chosen = sorted.slice(0,k); rest = sorted.slice(k); }
