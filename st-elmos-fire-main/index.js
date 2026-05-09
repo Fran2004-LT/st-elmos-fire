@@ -2120,6 +2120,12 @@ client.on('messageCreate', async msg => {
       const isCorrect = inputNotation === expectedNotation.toLowerCase();
       const zoneStatus = racePlayer.zone_active ? '✨ อยู่ในโซน — เลือกผลได้เอง' : '⚪ ไม่ได้อยู่ในโซน';
 
+      // เช็คว่าทอยไปแล้วในเทิร์นนี้ไหม
+      if (racePlayer.has_rolled) {
+        await msg.reply('⚠️ ทอยไปแล้วในเทิร์นนี้ครับ รอ Staff กด `/race endturn` ก่อน');
+        return;
+      }
+
       if (!isCorrect) {
         await msg.reply(
           '⚠️ **Dice ไม่ถูกต้อง!**\n' +
@@ -2133,19 +2139,17 @@ client.on('messageCreate', async msg => {
 
       try {
         const rollResult = rollDiceNotation(inputNotation);
-        if (rollResult) {
-          updateRacePlayer(userId, {
-            score: racePlayer.score + rollResult.total,
-            last_roll: JSON.stringify(rollResult)
-          });
-        }
-        const result = await buildRollEmbed(parsed, parsed.tokens, username, userId);
-        await msg.reply(result);
-        const updatedRacePlayer = getRacePlayer(userId);
-        await msg.channel.send(
-          '📊 **' + username + '** | สาย ' + racePlayer.run_style.toUpperCase() +
-          ' | คะแนนรวม: **' + (updatedRacePlayer?.score || 0).toLocaleString() + '** แต้ม | ' + zoneStatus
-        ).catch(() => {});
+        if (!rollResult) { await msg.reply('❌ เกิดข้อผิดพลาดครับ'); return; }
+        const freshPlayer = getRacePlayer(userId);
+        const newScore = (freshPlayer?.score || 0) + rollResult.total;
+        updateRacePlayer(userId, { score: newScore, last_roll: JSON.stringify(rollResult), has_rolled: 1 });
+        const colorLabel = rollColorMsg === 'gold' ? '🟡 ทอง' : '⚪ ขาว';
+        const { EmbedBuilder: EB2 } = await import('discord.js');
+        const rollEmbed = new EB2()
+          .setColor(rollColorMsg === 'gold' ? 0xD4AF37 : 0xffffff)
+          .setDescription('🎲 **' + username + '** | ' + colorLabel + ' | `' + inputNotation + '` → **' + rollResult.display + '**')
+          .setFooter({ text: 'สาย ' + racePlayer.run_style.toUpperCase() + ' | คะแนนรวม: ' + newScore.toLocaleString() + ' แต้ม | ' + zoneStatus });
+        await msg.reply({ embeds: [rollEmbed] });
       } catch(e) { console.error(e); }
       return;
     }
