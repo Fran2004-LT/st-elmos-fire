@@ -1403,6 +1403,11 @@ function roulPay(bet) { return ['red','black','odd','even','1-18','19-36'].inclu
 // ══════════════════════════════════════════════
 
 const TRAIN_CHANNEL_ID = '1498223895227138158';
+// ══════════════════════════════════════════════════════════════
+//  RACE SYSTEM v8.0 — เขียนใหม่ทั้งหมด
+//  แก้ไข: White/Gold roll, Safe (1-10), score, hill debuff
+// ══════════════════════════════════════════════════════════════
+
 const RACE_CHANNEL_IDS = {
   tokyo:    '1462831563690737919',
   nakayama: '1462831646523916380',
@@ -1412,7 +1417,7 @@ const RACE_CHANNEL_IDS = {
 };
 
 const TRACKS = {
-  nakayama: { name: 'Nakayama Racecourse', hasHill: true, hillPhases: [3, 4], hillPenalty: { front: 40, end: 30, pace: 20, late: 20 } },
+  nakayama: { name: 'Nakayama Racecourse', hasHill: true,  hillPhases: [3,4], hillPenalty: { front:40, end:30, pace:20, late:20 } },
   tokyo:    { name: 'Tokyo Racecourse',    hasHill: false },
   kyoto:    { name: 'Kyoto Racecourse',    hasHill: false },
   hanshin:  { name: 'Hanshin Racecourse',  hasHill: false },
@@ -1420,9 +1425,9 @@ const TRACKS = {
 };
 
 const DISTANCE_CONFIG = {
-  sprint:      { label: 'Sprint (8 turns)',      turnsPerPhase: [2, 2, 2, 2] },
-  mile_medium: { label: 'Mile/Medium (12 turns)', turnsPerPhase: [3, 3, 3, 3] },
-  long:        { label: 'Long (14 turns)',        turnsPerPhase: [3, 4, 3, 4] },
+  sprint:      { label: 'Sprint (8 turns)',       turnsPerPhase: [2,2,2,2] },
+  mile_medium: { label: 'Mile/Medium (12 turns)', turnsPerPhase: [3,3,3,3] },
+  long:        { label: 'Long (14 turns)',         turnsPerPhase: [3,4,3,4] },
 };
 
 const RACE_GRADES = {
@@ -1432,14 +1437,93 @@ const RACE_GRADES = {
   g1:    { label: 'G1',         safes: 0 },
 };
 
+// ── Dice table ──
+// White = non-G1 notation, Gold = G1 notation
+const DICE_TABLE = {
+  white: {
+    front: ['d30',  '3d30', '4d30', '2d30'],
+    pace:  ['d30',  '2d30', '2d30', '2d30'],
+    late:  ['d30',  '2d30', '3d30', '2d30'],
+    end:   ['d30',  '2d30', '6d30', 'd30' ],
+  },
+  gold: {
+    front: ['2d30',    '4d30',    '3d30',    'd30'    ],
+    pace:  ['3d30kh1', '6d30kh2', '6d30kh2', '6d30kh3'],
+    late:  ['2d30kh1', '4d30kh2', '9d30kh3', '3d30'  ],
+    end:   ['d30',     'd30',     '5d30',    '2d30'   ],
+  },
+};
+
+function getDiceNotation(style, phase, rollColor) {
+  return DICE_TABLE[rollColor]?.[style]?.[phase - 1] || 'd30';
+}
+
+// ── Determine roll color (white/gold) for a player ──
+// Gold = ห่างจากคนหน้า หรือ คนหลัง ≤ 10 แต้ม
+// เทิร์น 1 ของเฟส 1 ทุกคนทอยขาวเสมอ
+function getRollColor(player, allPlayers, session) {
+  if (session.current_phase === 1 && session.current_turn === 1) return 'white';
+  const sorted = [...allPlayers].sort((a,b) => b.score - a.score);
+  const idx = sorted.findIndex(p => p.user_id === player.user_id);
+  if (idx === -1) return 'white';
+  const ahead  = idx > 0 ? sorted[idx-1] : null;
+  const behind = idx < sorted.length-1 ? sorted[idx+1] : null;
+  const aheadDiff  = ahead  ? ahead.score  - player.score : Infinity;
+  const behindDiff = behind ? player.score - behind.score : Infinity;
+  if (aheadDiff <= 10 || behindDiff <= 10) return 'gold';
+  return 'white';
+}
+
+// ── Roll dice ──
+function rollDiceNotation(notation) {
+  const m = notation.toLowerCase().match(/^(\d*)d(\d+)(?:(kh|kl)(\d+))?$/);
+  if (!m) return null;
+  const [, n, sides, mode, keep] = m;
+  const num = n ? parseInt(n) : 1, s = parseInt(sides), k = keep ? parseInt(keep) : num;
+  const rolls = Array.from({ length: num }, () => Math.floor(Math.random() * s) + 1);
+  let chosen, rest;
+  if (mode === 'kh') { const sorted = [...rolls].sort((a,b) => b-a); chosen = sorted.slice(0,k); rest = sorted.slice(k); }
+  else if (mode === 'kl') { const sorted = [...rolls].sort((a,b) => a-b); chosen = sorted.slice(0,k); rest = sorted.slice(k); }
+  else { chosen = rolls; rest = []; }
+  const total = chosen.reduce((a,b) => a+b, 0);
+  // display: เลขไม่ถูกตัดแสดงปกติ เลขถูกตัดอยู่ในวงเล็บ
+  const allNums = [...rolls];
+  const restSet = [...rest];
+  const displayParts = [];
+  for (const r of allNums) {
+    const ridx = restSet.indexOf(r);
+    if (ridx !== -1) { displayParts.push(`(${r})`); restSet.splice(ridx,1); }
+    else displayParts.push(`${r}`);
+  }
+  const display = `${total} [${displayParts.join(' ')}]`;
+  return { total, chosen, rest, display, notation };
+}
+
+// ── Safe check ──
+// ใช้ได้เมื่อหลักหน่วยของผลรวม (ที่ไม่ถูกตัด) เป็น 1-10
+// และตัวเลขหลักหน่วยนั้นต้องไม่อยู่ในวงเล็บ (ไม่ถูก KH/KL ตัด)
+function canUseSafe(rollResult) {
+  const units = rollResult.total % 10;
+  if (units === 0) return false; // หลักหน่วย 0 = ใช้ไม่ได้
+  // เช็คว่าหลักหน่วยของ total อยู่ใน rest ไหม
+  // ถ้าอยู่ใน rest แปลว่าถูกตัด = ใช้ไม่ได้
+  // หลักหน่วยของ total มาจากการบวก chosen ทั้งหมด
+  // ไม่ต้องเช็ค rest โดยตรง แค่เช็คว่า rest มีค่าที่หลักหน่วยตรงกับหลักหน่วยของ total ไหม
+  // แต่จริงๆ แล้ว rule คือ: ถ้ามีตัวเลขในช่วง 1-10 ที่ไม่อยู่ในวงเล็บ = safe ได้
+  const hasUnsafed1to10 = rollResult.chosen.some(v => v >= 1 && v <= 10);
+  return hasUnsafed1to10;
+}
+
+// ── All out injury ──
 function getAllOutInjury(count) {
   if (count <= 3) return 'เหยียบก้อนกรวด เจ็บนิดหน่อย';
   if (count <= 5) return 'ข้อเท้าแพลง';
   if (count <= 6) return 'บาดเจ็บเล็กน้อย';
   if (count <= 8) return 'อาจต้องพักและเข้าพบแพทย์';
-  return 'เสี่ยงบาดเจ็บหนัก!';
+  return 'เสี่ยงบาดเจ็บหนัก! อาจพักการแข่ง 1 เดือน';
 }
 
+// ── Race DB ──
 const raceDb = new Database(':memory:');
 raceDb.exec(`
   CREATE TABLE IF NOT EXISTS race_session (
@@ -1449,9 +1533,13 @@ raceDb.exec(`
   );
   CREATE TABLE IF NOT EXISTS race_players (
     user_id TEXT PRIMARY KEY, username TEXT DEFAULT '', run_style TEXT DEFAULT '',
-    score INTEGER DEFAULT 0, race_safes INTEGER DEFAULT 0, one_use_safes INTEGER DEFAULT 0,
-    reroll_count INTEGER DEFAULT 0, all_out_count INTEGER DEFAULT 0, hill_debuff INTEGER DEFAULT 0,
-    last_roll TEXT DEFAULT '', zone_active INTEGER DEFAULT 0
+    score INTEGER DEFAULT 0,
+    race_safes INTEGER DEFAULT 0,
+    one_use_safes INTEGER DEFAULT 0,
+    all_out_count INTEGER DEFAULT 0,
+    hill_debuff INTEGER DEFAULT 0,
+    last_roll TEXT DEFAULT '',
+    has_rolled INTEGER DEFAULT 0
   );
   INSERT OR IGNORE INTO race_session (id, active) VALUES (1, 0);
 `);
@@ -1471,79 +1559,23 @@ function clearRaceSession() {
   raceDb.exec(`DELETE FROM race_players; UPDATE race_session SET active=0, current_phase=1, current_turn=1, track='', distance='', grade='';`);
 }
 
-function rollDiceNotation(notation) {
-  const m = notation.toLowerCase().match(/^(\d*)d(\d+)(?:(kh|kl)(\d+))?$/);
-  if (!m) return null;
-  const [, n, sides, mode, keep] = m;
-  const num = n ? parseInt(n) : 1, s = parseInt(sides), k = keep ? parseInt(keep) : num;
-  const rolls = Array.from({ length: num }, () => Math.floor(Math.random() * s) + 1);
-  let chosen, rest;
-  if (mode === 'kh') { const sorted = [...rolls].sort((a,b) => b-a); chosen = sorted.slice(0,k); rest = sorted.slice(k); }
-  else if (mode === 'kl') { const sorted = [...rolls].sort((a,b) => a-b); chosen = sorted.slice(0,k); rest = sorted.slice(k); }
-  else { chosen = rolls; rest = []; }
-  const total = chosen.reduce((a,b) => a+b, 0);
-  const display = rest.length ? `${total} [${rest.join(', ')}]` : `${total}`;
-  return { total, chosen, rest, display, notation };
-}
-
-function canUseSafe(rollResult) {
-  const units = rollResult.total % 10;
-  return units >= 1 && units <= 9 && rollResult.rest.length === 0;
-}
-
-function getDiceNotation(style, phase, grade) {
-  const upper = { front: ['d30','3d30','4d30','2d30'], pace: ['d30','2d30','2d30','2d30'], late: ['d30','2d30','3d30','2d30'], end: ['d30','2d30','6d30','d30'] };
-  const lower = { front: ['2d30','4d30','3d30','d30'], pace: ['3d30kh1','6d30kh2','6d30kh2','6d30kh3'], late: ['2d30kh1','4d30kh2','9d30kh3','3d30'], end: ['d30','d30','5d30','d30'] };
-  return (grade === 'g1' ? lower : upper)[style]?.[phase - 1] || 'd30';
-}
-
-const raceCommands = [
-  new SlashCommandBuilder().setName('race').setDescription('[Staff] จัดการระบบการแข่ง')
-    .addSubcommand(s => s.setName('start').setDescription('[Staff] เปิด session')
-      .addStringOption(o => o.setName('track').setDescription('สนาม').setRequired(true).addChoices({name:'Nakayama',value:'nakayama'},{name:'Tokyo',value:'tokyo'},{name:'Kyoto',value:'kyoto'},{name:'Hanshin',value:'hanshin'},{name:'Chukyo',value:'chukyo'}))
-      .addStringOption(o => o.setName('distance').setDescription('ระยะทาง').setRequired(true).addChoices({name:'Sprint (8T)',value:'sprint'},{name:'Mile/Medium (12T)',value:'mile_medium'},{name:'Long (14T)',value:'long'}))
-      .addStringOption(o => o.setName('grade').setDescription('ระดับ').setRequired(true).addChoices({name:'Make Debut',value:'debut'},{name:'G3',value:'g3'},{name:'G2',value:'g2'},{name:'G1',value:'g1'})))
-    .addSubcommand(s => s.setName('register').setDescription('ลงทะเบียนสายวิ่ง')
-      .addStringOption(o => o.setName('style').setDescription('สาย').setRequired(true).addChoices({name:'Front',value:'front'},{name:'Pace',value:'pace'},{name:'Late',value:'late'},{name:'End',value:'end'})))
-    .addSubcommand(s => s.setName('roll').setDescription('[Staff] ทอยให้ผู้เล่น').addUserOption(o => o.setName('player').setDescription('ผู้เล่น').setRequired(true)))
-    .addSubcommand(s => s.setName('safe').setDescription('ใช้ Safe'))
-    .addSubcommand(s => s.setName('reroll').setDescription('ใช้ Reroll').addStringOption(o => o.setName('type').setDescription('ประเภท').setRequired(true).addChoices({name:'Reroll ติดตัว',value:'personal'},{name:'Reroll กิจกรรม',value:'activity'},{name:'Reroll เทรนเนอร์',value:'trainer'})))
-    .addSubcommand(s => s.setName('debuffskill').setDescription('ใช้ Debuff Skill').addUserOption(o => o.setName('target').setDescription('เป้าหมาย').setRequired(true)))
-    .addSubcommand(s => s.setName('slowdown').setDescription('ลดความเร็ว'))
-    .addSubcommand(s => s.setName('allout').setDescription('All out — หัก 10 แต้มทบ'))
-    .addSubcommand(s => s.setName('zone').setDescription('เปิดโซน (G1 เท่านั้น)').addStringOption(o => o.setName('color').setDescription('ทองหรือขาว').setRequired(true).addChoices({name:'ทอง',value:'gold'},{name:'ขาว',value:'white'})))
-    .addSubcommand(s => s.setName('endturn').setDescription('[Staff] จบเทิร์น'))
-    .addSubcommand(s => s.setName('endphase').setDescription('[Staff] จบเฟส'))
-    .addSubcommand(s => s.setName('end').setDescription('[Staff] จบการแข่ง'))
-    .addSubcommand(s => s.setName('score').setDescription('[Staff] ดูคะแนนทุกคน (เฉพาะ Staff)')),
-
-  new SlashCommandBuilder().setName('train').setDescription('ระบบฝึกซ้อม')
-    .addSubcommand(s => s.setName('submit').setDescription('ส่งบทฝึก')
-      .addUserOption(o => o.setName('trainer').setDescription('เทรนเนอร์').setRequired(true))
-      .addStringOption(o => o.setName('horses').setDescription('mention สาวม้า (@ม้าA @ม้าB)').setRequired(true))
-      .addStringOption(o => o.setName('type').setDescription('ประเภท').setRequired(true).addChoices({name:'Reroll (คุยสนทนา)',value:'chat'},{name:'Reroll (ฝึกคู่/กลุ่ม)',value:'group'},{name:'Safe (ฝึกคนเดียว)',value:'solo'},{name:'Zone (ฝึกโซน)',value:'zone'},{name:'ล้างเนินมรณะ',value:'hill'}))
-      .addChannelOption(o => o.setName('location').setDescription('channel ที่ฝึก').setRequired(true)))
-    .addSubcommand(s => s.setName('approve').setDescription('[Staff] อนุมัติบทฝึก')
-      .addUserOption(o => o.setName('horse').setDescription('สาวม้า').setRequired(true))
-      .addStringOption(o => o.setName('type').setDescription('ประเภท').setRequired(true).addChoices({name:'คุยสนทนา',value:'chat'},{name:'ฝึกคู่/กลุ่ม',value:'group'},{name:'ฝึกคนเดียว',value:'solo'},{name:'ล้างเนินมรณะ',value:'hill'}))
-      .addUserOption(o => o.setName('trainer').setDescription('เทรนเนอร์').setRequired(false))),
-];
-
 async function handleRace(interaction) {
   const sub = interaction.options.getSubcommand();
   const userId = interaction.user.id;
   const isStaffMember = interaction.member?.roles?.cache?.some(r => r.id === STAFF_ROLE_ID || r.name === STAFF_ROLE);
   const session = getRaceSession();
 
+  // ─── START ───
   if (sub === 'start') {
     if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
     if (session.active) return interaction.reply({ content: 'มี session อยู่แล้วครับ ใช้ /race end ก่อน', flags: 64 });
     const track = interaction.options.getString('track');
     const distance = interaction.options.getString('distance');
     const grade = interaction.options.getString('grade');
-    updateRaceSession({ active: 1, track, distance, grade, current_phase: 1, current_turn: 1 });
+    updateRaceSession({ active:1, track, distance, grade, current_phase:1, current_turn:1 });
     const t = TRACKS[track], d = DISTANCE_CONFIG[distance], g = RACE_GRADES[grade];
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle('🏇 เปิด Session การแข่งแล้ว!')
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37)
+      .setTitle('🏇 เปิด Session การแข่งแล้ว!')
       .addFields(
         { name: '🏟️ สนาม', value: t.name, inline: true },
         { name: '📏 ระยะ', value: d.label, inline: true },
@@ -1554,73 +1586,91 @@ async function handleRace(interaction) {
       ).setFooter({ text: 'ผู้เล่นใช้ /race register เพื่อลงทะเบียน' })] });
   }
 
+  // ─── REGISTER ───
   if (sub === 'register') {
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const style = interaction.options.getString('style');
     const g = RACE_GRADES[session.grade];
+    const mp = getPlayer(userId);
+    const oneUseSafe = mp ? (mp.race_safe || 0) : 0;
     const existing = getRacePlayer(userId);
-    const mp2 = getPlayer(userId);
-    const oneUseSafe = mp2 ? (mp2.race_safe || 0) : 0;
-    if (existing) { updateRacePlayer(userId, { run_style: style, one_use_safes: oneUseSafe }); }
-    else { raceDb.prepare('INSERT INTO race_players (user_id, username, run_style, race_safes, one_use_safes) VALUES (?,?,?,?,?)').run(userId, interaction.user.username, style, g.safes, oneUseSafe); }
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setDescription(`✅ **${interaction.user.username}** ลงทะเบียนสาย **${style.toUpperCase()}** แล้วครับ`)], flags: 64 });
+    if (existing) {
+      raceDb.prepare(`UPDATE race_players SET run_style=?, score=0, race_safes=?, one_use_safes=?,
+        hill_debuff=0, last_roll='', has_rolled=0, all_out_count=0 WHERE user_id=?`)
+        .run(style, g.safes, oneUseSafe, userId);
+    } else {
+      raceDb.prepare(`INSERT INTO race_players (user_id, username, run_style, race_safes, one_use_safes)
+        VALUES (?,?,?,?,?)`).run(userId, interaction.user.username, style, g.safes, oneUseSafe);
+    }
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287)
+      .setDescription(`✅ **${interaction.user.username}** ลงทะเบียนสาย **${style.toUpperCase()}** แล้วครับ\n🛡️ Safe: ${g.safes} (ติดตัว) + ${oneUseSafe} (กิจกรรม)`)], flags: 64 });
   }
 
+  // ─── ROLL (Staff) ───
   if (sub === 'roll') {
     if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const target = interaction.options.getUser('player');
     const player = getRacePlayer(target.id);
     if (!player) return interaction.reply({ content: 'ผู้เล่นยังไม่ได้ลงทะเบียนครับ', flags: 64 });
-    const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
+    if (player.has_rolled) return interaction.reply({ content: `${target.username} ทอยไปแล้วในเทิร์นนี้ครับ`, flags: 64 });
+    const allPlayers = getAllRacePlayers();
+    const rollColor = getRollColor(player, allPlayers, session);
+    const notation = getDiceNotation(player.run_style, session.current_phase, rollColor);
     const result = rollDiceNotation(notation);
-    if (!result) return interaction.reply({ content: `❌ เกิดข้อผิดพลาด notation: \`${notation}\` ครับ`, flags: 64 });
+    if (!result) return interaction.reply({ content: `❌ Error notation: ${notation}`, flags: 64 });
+    // Hill debuff — หักแต้มถาวรเมื่อเข้าเฟส 3-4 ของ Nakayama ครั้งแรกเท่านั้น
     const track = TRACKS[session.track];
     let hillMsg = '';
-    let baseScore = player.score;
+    let hillPenaltyNow = 0;
     if (track?.hasHill && track.hillPhases.includes(session.current_phase) && !player.hill_debuff) {
-      const penalty = track.hillPenalty[player.run_style] || 0;
-      baseScore -= penalty;
+      hillPenaltyNow = track.hillPenalty[player.run_style] || 0;
       updateRacePlayer(target.id, { hill_debuff: 1 });
-      hillMsg = `\n⛰️ **เนินมรณะ** หัก -${penalty} แต้ม`;
+      hillMsg = `\n⛰️ **เนินมรณะ** หัก -${hillPenaltyNow} แต้ม (ถาวร)`;
     }
-    const newScore = baseScore + result.total;
-    updateRacePlayer(target.id, { last_roll: JSON.stringify(result), score: newScore });
+    const newScore = player.score + result.total - hillPenaltyNow;
+    const finalScore = newScore;
+    updateRacePlayer(target.id, { last_roll: JSON.stringify(result), has_rolled: 1, score: finalScore });
     const canSafe = canUseSafe(result);
-    const distCfgR = DISTANCE_CONFIG[session.distance] || DISTANCE_CONFIG['mile_medium'];
-    const turnsInPhase = distCfgR.turnsPerPhase[(session.current_phase - 1)] || 3;
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37)
+    const totalSafe = (player.race_safes || 0) + (player.one_use_safes || 0);
+    const colorEmoji = rollColor === 'gold' ? '🟡 ทอง' : '⚪ ขาว';
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(rollColor === 'gold' ? 0xD4AF37 : 0xffffff)
       .setTitle(`🎲 ${target.username} — เฟส ${session.current_phase} เทิร์น ${session.current_turn}`)
       .addFields(
+        { name: '🎨 โรล', value: colorEmoji, inline: true },
         { name: '🎯 Dice', value: `\`${notation}\``, inline: true },
         { name: '📊 ผล', value: `**${result.display}**${hillMsg}`, inline: true },
         { name: '🏃 สาย', value: player.run_style.toUpperCase(), inline: true },
-        { name: '📈 คะแนนรวม', value: `**${newScore.toLocaleString()}** แต้ม`, inline: true },
-        { name: '🛡️ Safe', value: canSafe ? `ใช้ได้ | Race: ${player.race_safes||0} | One-use: ${player.one_use_safes||0}` : 'ใช้ไม่ได้', inline: true },
-        { name: '⏱️ เทิร์นในเฟสนี้', value: `${session.current_turn} / ${turnsInPhase}`, inline: true },
+        { name: '📈 คะแนนรวม', value: `**${finalScore.toLocaleString()}** แต้ม`, inline: true },
+        { name: '🛡️ Safe', value: canSafe ? `ใช้ได้ (${totalSafe} อัน)` : 'ใช้ไม่ได้', inline: true },
       )] });
   }
 
+  // ─── SAFE ───
   if (sub === 'safe') {
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const player = getRacePlayer(userId);
     if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
     const lastRoll = player.last_roll ? JSON.parse(player.last_roll) : null;
-    if (!lastRoll) return interaction.reply({ content: 'ยังไม่มีผลทอยครับ', flags: 64 });
-    if (!canUseSafe(lastRoll)) return interaction.reply({ content: '❌ ใช้ Safe ไม่ได้ — หลักหน่วยอยู่ในวงเล็บ (KH/KL) หรือเป็น 0', flags: 64 });
+    if (!lastRoll) return interaction.reply({ content: '❌ ยังไม่มีผลทอยครับ', flags: 64 });
+    if (!canUseSafe(lastRoll)) return interaction.reply({ content: '❌ ใช้ Safe ไม่ได้ — ไม่มีตัวเลข 1-10 นอกวงเล็บครับ', flags: 64 });
     const totalSafe = (player.race_safes || 0) + (player.one_use_safes || 0);
     if (totalSafe < 1) return interaction.reply({ content: '❌ ไม่มี Safe เหลือครับ', flags: 64 });
-    // ใช้ one_use_safes ก่อน ถ้าไม่มีค่อยใช้ race_safes
-    if ((player.one_use_safes || 0) > 0) { updateRacePlayer(userId, { one_use_safes: player.one_use_safes - 1 }); }
-    else { updateRacePlayer(userId, { race_safes: player.race_safes - 1 }); }
-    const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
+    // ใช้ one_use_safes ก่อน
+    if ((player.one_use_safes || 0) > 0) updateRacePlayer(userId, { one_use_safes: player.one_use_safes - 1 });
+    else updateRacePlayer(userId, { race_safes: player.race_safes - 1 });
+    // ทอยใหม่ด้วย notation เดิม
+    const allPlayers = getAllRacePlayers();
+    const rollColor = getRollColor(player, allPlayers, session);
+    const notation = getDiceNotation(player.run_style, session.current_phase, rollColor);
     const newResult = rollDiceNotation(notation);
     if (!newResult) return interaction.reply({ content: '❌ เกิดข้อผิดพลาดครับ', flags: 64 });
-    // ลบคะแนนเดิมที่เพิ่งทอย แล้วบวกคะแนนใหม่
+    // คำนวณ score ใหม่ (ลบเดิม บวกใหม่)
     const scoreWithoutOld = player.score - lastRoll.total;
     const newScore = scoreWithoutOld + newResult.total;
     updateRacePlayer(userId, { last_roll: JSON.stringify(newResult), score: newScore });
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle(`🛡️ ${interaction.user.username} ใช้ Safe!`)
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287)
+      .setTitle(`🛡️ ${interaction.user.username} ใช้ Safe!`)
       .addFields(
         { name: '📊 ผลเดิม', value: `~~${lastRoll.display}~~`, inline: true },
         { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true },
@@ -1628,108 +1678,174 @@ async function handleRace(interaction) {
       )] });
   }
 
+  // ─── REROLL ───
+  if (sub === 'reroll') {
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
+    const player = getRacePlayer(userId);
+    if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
+    const type = interaction.options.getString('type');
+    const mp = getPlayer(userId);
+    if (!mp) return interaction.reply({ content: 'ไม่พบข้อมูลผู้เล่นครับ', flags: 64 });
+    if (type === 'personal' && (mp.race_reroll ?? 1) < 1) return interaction.reply({ content: '❌ ไม่มี Main Reroll เหลือครับ', flags: 64 });
+    if (type === 'activity' && (mp.inv_reroll || 0) < 1) return interaction.reply({ content: '❌ ไม่มี One-use Reroll เหลือครับ', flags: 64 });
+    if (type === 'trainer' && (mp.trainer_reroll || 0) < 1) return interaction.reply({ content: '❌ ไม่มี Reroll Trainer เหลือครับ', flags: 64 });
+    const lastRoll = player.last_roll ? JSON.parse(player.last_roll) : null;
+    // ลบ reroll
+    if (type === 'personal') updatePlayer(userId, { race_reroll: (mp.race_reroll ?? 1) - 1 });
+    else if (type === 'activity') updatePlayer(userId, { inv_reroll: (mp.inv_reroll || 0) - 1 });
+    else if (type === 'trainer') updatePlayer(userId, { trainer_reroll: (mp.trainer_reroll || 0) - 1 });
+    // ทอยใหม่
+    const allPlayers = getAllRacePlayers();
+    const rollColor = getRollColor(player, allPlayers, session);
+    const notation = getDiceNotation(player.run_style, session.current_phase, rollColor);
+    const newResult = rollDiceNotation(notation);
+    if (!newResult) return interaction.reply({ content: '❌ เกิดข้อผิดพลาดครับ', flags: 64 });
+    const scoreWithoutOld = lastRoll ? player.score - lastRoll.total : player.score;
+    const newScore = scoreWithoutOld + newResult.total;
+    updateRacePlayer(userId, { last_roll: JSON.stringify(newResult), score: newScore, has_rolled: 1 });
+    const typeLabel = { personal:'Main Reroll', activity:'One-use Reroll', trainer:'Reroll Trainer' }[type];
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xF59E0B)
+      .setTitle(`🔄 ${interaction.user.username} ใช้ ${typeLabel}!`)
+      .addFields(
+        { name: '📊 ผลเดิม', value: lastRoll ? `~~${lastRoll.display}~~` : '—', inline: true },
+        { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true },
+        { name: '📈 คะแนนรวม', value: `**${newScore.toLocaleString()}** แต้ม`, inline: true },
+      )] });
+  }
+
+  // ─── DEBUFF SKILL ───
+  if (sub === 'debuffskill') {
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
+    const player = getRacePlayer(userId);
+    if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
+    const mp = getPlayer(userId);
+    if (!mp || (mp.race_reroll ?? 1) < 1) return interaction.reply({ content: '❌ ไม่มี Main Reroll ติดตัวครับ', flags: 64 });
+    const target = interaction.options.getUser('target');
+    const tp = getRacePlayer(target.id);
+    if (!tp) return interaction.reply({ content: 'ผู้เล่นคนนี้ไม่ได้ลงทะเบียนครับ', flags: 64 });
+    updatePlayer(userId, { race_reroll: (mp.race_reroll ?? 1) - 1 });
+    const allPlayers = getAllRacePlayers();
+    const rollColor = getRollColor(tp, allPlayers, session);
+    const notation = getDiceNotation(tp.run_style, session.current_phase, rollColor);
+    const newResult = rollDiceNotation(notation);
+    if (!newResult) return interaction.reply({ content: '❌ เกิดข้อผิดพลาดครับ', flags: 64 });
+    const oldRoll = tp.last_roll ? JSON.parse(tp.last_roll) : null;
+    const scoreWithoutOld = oldRoll ? tp.score - oldRoll.total : tp.score;
+    const newScore = scoreWithoutOld + newResult.total;
+    updateRacePlayer(target.id, { last_roll: JSON.stringify(newResult), score: newScore });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757)
+      .setTitle('⚡ Debuff Skill!')
+      .setDescription(`**${interaction.user.username}** ใช้ Debuff Skill กับ **${target.username}**!`)
+      .addFields(
+        { name: '📊 ผลเดิม', value: oldRoll ? `~~${oldRoll.display}~~` : '—', inline: true },
+        { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true },
+        { name: '📈 คะแนนใหม่', value: `**${newScore.toLocaleString()}** แต้ม`, inline: true },
+      )] });
+  }
+
+  // ─── ALL OUT ───
   if (sub === 'allout') {
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const player = getRacePlayer(userId);
     if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
     const count = player.all_out_count + 1;
     const penalty = count * 10;
-    const notation = getDiceNotation(player.run_style, session.current_phase, session.grade);
+    const allPlayers = getAllRacePlayers();
+    const rollColor = getRollColor(player, allPlayers, session);
+    const notation = getDiceNotation(player.run_style, session.current_phase, rollColor);
     const newResult = rollDiceNotation(notation);
     if (!newResult) return interaction.reply({ content: '❌ เกิดข้อผิดพลาดครับ', flags: 64 });
-    const newAllOutScore = player.score + newResult.total - penalty;
-    updateRacePlayer(userId, { all_out_count: count, score: newAllOutScore, last_roll: JSON.stringify(newResult) });
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757).setTitle(`💥 ${interaction.user.username} — All Out! (ครั้งที่ ${count})`)
-      .addFields({ name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true }, { name: '💔 หักแต้ม', value: `-${penalty} แต้ม`, inline: true }, { name: '🤕 อาการ', value: getAllOutInjury(count) })] });
+    const oldRoll = player.last_roll ? JSON.parse(player.last_roll) : null;
+    const scoreWithoutOld = oldRoll ? player.score - oldRoll.total : player.score;
+    const newScore = scoreWithoutOld + newResult.total - penalty;
+    updateRacePlayer(userId, { all_out_count: count, score: newScore, last_roll: JSON.stringify(newResult), has_rolled: 1 });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757)
+      .setTitle(`💥 ${interaction.user.username} — All Out! (ครั้งที่ ${count})`)
+      .addFields(
+        { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true },
+        { name: '💔 หักแต้ม', value: `-${penalty} แต้ม`, inline: true },
+        { name: '📈 คะแนนรวม', value: `**${newScore.toLocaleString()}** แต้ม`, inline: true },
+        { name: '🤕 อาการ', value: getAllOutInjury(count) },
+      )] });
   }
 
-  if (sub === 'debuffskill') {
-    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
-    const player = getRacePlayer(userId);
-    if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
-    const mp = getPlayer(userId);
-    if (!mp || (mp.race_reroll ?? 1) < 1) return interaction.reply({ content: '❌ ไม่มี Reroll ติดตัวครับ', flags: 64 });
-    const target = interaction.options.getUser('target');
-    const tp = getRacePlayer(target.id);
-    if (!tp) return interaction.reply({ content: 'ผู้เล่นคนนี้ไม่ได้ลงทะเบียนครับ', flags: 64 });
-    updatePlayer(userId, { race_reroll: (mp.race_reroll ?? 1) - 1 });
-    const notation = getDiceNotation(tp.run_style, session.current_phase, session.grade);
-    const newResult = rollDiceNotation(notation);
-    if (!newResult) return interaction.reply({ content: '❌ เกิดข้อผิดพลาดครับ', flags: 64 });
-    const old = tp.last_roll ? JSON.parse(tp.last_roll) : null;
-    // ลบคะแนนเดิม แล้วบวกคะแนนใหม่
-    const tpScoreNew = old ? (tp.score - old.total + newResult.total) : (tp.score + newResult.total);
-    updateRacePlayer(target.id, { last_roll: JSON.stringify(newResult), score: tpScoreNew });
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757).setTitle('⚡ Debuff Skill!')
-      .setDescription(`**${interaction.user.username}** ใช้ Debuff Skill กับ **${target.username}**!`)
-      .addFields({ name: '📊 ผลเดิม', value: old ? `~~${old.display}~~` : '—', inline: true }, { name: '📊 ผลใหม่', value: `**${newResult.display}**`, inline: true })] });
-  }
-
+  // ─── ZONE ───
   if (sub === 'zone') {
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
-    if (session.grade !== 'g1') return interaction.reply({ content: '❌ Zone ใช้ได้เฉพาะ G1 ครับ', flags: 64 });
     const player = getRacePlayer(userId);
     if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
     const color = interaction.options.getString('color');
     updateRacePlayer(userId, { zone_active: 1 });
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(color === 'gold' ? 0xD4AF37 : 0xffffff)
-      .setTitle(`✨ ${interaction.user.username} เปิดโซน!`)
-      .setDescription(`เลือกทอย **${color === 'gold' ? 'ทอง 🟡' : 'ขาว ⚪'}** — สามารถเลือกผลลัพธ์ไหนก็ได้ครับ`)] });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(color === 'gold' ? 0xD4AF37 : 0xaaaaaa)
+      .setTitle(`✨ ${interaction.user.username} เปิดโซน${color === 'gold' ? 'ทอง' : 'ขาว'}!`)
+      .setDescription(`สามารถเลือกผลลัพธ์ที่ต้องการได้ครับ`)] });
   }
 
+  // ─── ENDTURN ───
   if (sub === 'endturn') {
     if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
-    const distCfgET = DISTANCE_CONFIG[session.distance] || DISTANCE_CONFIG['mile_medium'];
-    const turnsInPhaseET = distCfgET.turnsPerPhase[(session.current_phase - 1)] || 3;
+    const distCfg = DISTANCE_CONFIG[session.distance] || DISTANCE_CONFIG['mile_medium'];
+    const turnsInPhase = distCfg.turnsPerPhase[session.current_phase - 1] || 3;
     const currentTurn = session.current_turn;
     const nextTurn = currentTurn + 1;
-    // Reset last_roll ทุกคนเมื่อขึ้นเทิร์นใหม่
+    // Reset has_rolled และ zone_active ทุกคน
     const allPlayers = getAllRacePlayers();
-    for (const p of allPlayers) { updateRacePlayer(p.user_id, { last_roll: '', zone_active: 0 }); }
-    // ถ้าเทิร์นถัดไปเกินจำนวนในเฟส ให้แจ้ง Staff กด endphase
-    if (nextTurn > turnsInPhaseET) {
+    for (const p of allPlayers) updateRacePlayer(p.user_id, { has_rolled: 0, zone_active: 0 });
+    if (nextTurn > turnsInPhase) {
       updateRaceSession({ current_turn: nextTurn });
       return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757)
-        .setDescription(`✅ จบเทิร์น ${currentTurn} — **จบเฟส ${session.current_phase} แล้ว!**\nกรุณาใช้ \`/race endphase\` ครับ`)] });
+        .setDescription(`✅ จบเทิร์น ${currentTurn} — **ครบเฟส ${session.current_phase} แล้ว!** กรุณากด \`/race endphase\` ครับ`)] });
     }
     updateRaceSession({ current_turn: nextTurn });
-    const nextNotations = ['front','pace','late','end'].map(s => s.toUpperCase() + ': \`' + getDiceNotation(s, session.current_phase, session.grade) + '\`').join(' | ');
+    // แสดง notation ทั้งหมดสำหรับเทิร์นถัดไป
+    const scores = getAllRacePlayers();
+    const notations = ['front','pace','late','end'].map(s => {
+      const fakePlayer = { user_id:'x', run_style:s, score:0 };
+      // ไม่รู้ score จริงๆ ให้แสดงทั้ง white และ gold
+      return `${s.toUpperCase()}: ⚪\`${getDiceNotation(s, session.current_phase, 'white')}\` 🟡\`${getDiceNotation(s, session.current_phase, 'gold')}\``;
+    }).join('\n');
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37)
-      .setDescription('✅ จบเทิร์น ' + currentTurn + ' → เทิร์น **' + nextTurn + '** / ' + turnsInPhaseET + '\n📋 ' + nextNotations)] });
+      .setDescription(`✅ จบเทิร์น ${currentTurn} → เทิร์น **${nextTurn}** / ${turnsInPhase}\n\n${notations}`)] });
   }
 
+  // ─── ENDPHASE ───
   if (sub === 'endphase') {
     if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
-    // โมเมนตัม +5 แต้ม ถูกลบออกแล้ว
+    const allPlayers = getAllRacePlayers();
+    for (const p of allPlayers) updateRacePlayer(p.user_id, { has_rolled: 0, zone_active: 0 });
     updateRaceSession({ current_phase: session.current_phase + 1, current_turn: 1 });
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle(`✅ จบเฟส ${session.current_phase}`).setDescription(`เริ่มเฟส **${session.current_phase + 1}**`)] });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37)
+      .setTitle(`✅ จบเฟส ${session.current_phase}`)
+      .setDescription(`เริ่มเฟส **${session.current_phase + 1}**`)] });
   }
 
+  // ─── SCORE ───
   if (sub === 'score') {
     if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const players = getAllRacePlayers();
-    if (players.length === 0) return interaction.reply({ content: 'ยังไม่มีผู้เล่นลงทะเบียนครับ', flags: 64 });
-    const board = players.map((p, i) => {
-      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+    if (players.length === 0) return interaction.reply({ content: 'ยังไม่มีผู้เล่นครับ', flags: 64 });
+    const board = players.map((p,i) => {
+      const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}.`;
       return `${medal} **${p.username}** (${p.run_style.toUpperCase()}) — **${p.score.toLocaleString()}** แต้ม`;
     }).join('\n');
-    return interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0xD4AF37)
-        .setTitle(`📊 คะแนนปัจจุบัน — เฟส ${session.current_phase} เทิร์น ${session.current_turn}`)
-        .setDescription(board)
-        .setFooter({ text: 'เห็นเฉพาะ Staff' })],
-      flags: 64,
-    });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37)
+      .setTitle(`📊 คะแนนปัจจุบัน — เฟส ${session.current_phase} เทิร์น ${session.current_turn}`)
+      .setDescription(board).setFooter({ text: 'เห็นเฉพาะ Staff' })], flags: 64 });
   }
 
+  // ─── END ───
   if (sub === 'end') {
     if (!isStaffMember) return interaction.reply({ content: 'เฉพาะ Staff ครับ', flags: 64 });
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const players = getAllRacePlayers();
-    const board = players.map((p,i) => `${i+1}. **${p.username}** (${p.run_style.toUpperCase()}) — ${p.score} แต้ม`).join('\n');
+    const board = players.map((p,i) => {
+      const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}.`;
+      return `${medal} **${p.username}** (${p.run_style.toUpperCase()}) — **${p.score.toLocaleString()}** แต้ม`;
+    }).join('\n');
+    // Restock race_reroll
     for (const rp of players) {
       const mp = getPlayer(rp.user_id);
       if (mp) updatePlayer(rp.user_id, { race_reroll: mp.race_reroll_max ?? 1 });
@@ -1738,11 +1854,14 @@ async function handleRace(interaction) {
     try {
       const raceChId = RACE_CHANNEL_IDS[session.track] || RACE_CHANNEL_IDS.nakayama;
       const ch = await interaction.client.channels.fetch(raceChId);
-      if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0xD4AF37).setTitle('🏁 จบการแข่ง!').setDescription(board || 'ไม่มีผู้เล่น')] });
+      if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0xD4AF37)
+        .setTitle('🏁 จบการแข่ง!')
+        .setDescription(board || 'ไม่มีผู้เล่น')] });
     } catch(e) {}
     return interaction.reply({ content: '✅ จบการแข่งและล้าง session แล้วครับ', flags: 64 });
   }
 }
+
 
 async function handleTrain(interaction) {
   const sub = interaction.options.getSubcommand();
@@ -1973,7 +2092,9 @@ client.on('messageCreate', async msg => {
   if (session?.active) {
     const racePlayer = getRacePlayer(userId);
     if (racePlayer) {
-      const expectedNotation = getDiceNotation(racePlayer.run_style, session.current_phase, session.grade);
+      const allPlayersMsg = getAllRacePlayers();
+      const rollColorMsg = getRollColor(racePlayer, allPlayersMsg, session);
+      const expectedNotation = getDiceNotation(racePlayer.run_style, session.current_phase, rollColorMsg);
       const inputNotation = raw.trim().toLowerCase().replace(/\s/g, '');
       const isCorrect = inputNotation === expectedNotation.toLowerCase();
       const zoneStatus = racePlayer.zone_active ? '✨ อยู่ในโซน — เลือกผลได้เอง' : '⚪ ไม่ได้อยู่ในโซน';
