@@ -1539,7 +1539,8 @@ raceDb.exec(`
     all_out_count INTEGER DEFAULT 0,
     hill_debuff INTEGER DEFAULT 0,
     last_roll TEXT DEFAULT '',
-    has_rolled INTEGER DEFAULT 0
+    has_rolled INTEGER DEFAULT 0,
+    zone_active INTEGER DEFAULT 0
   );
   INSERT OR IGNORE INTO race_session (id, active) VALUES (1, 0);
 `);
