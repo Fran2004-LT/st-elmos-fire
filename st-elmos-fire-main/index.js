@@ -2138,17 +2138,24 @@ client.on('messageCreate', async msg => {
       }
 
       try {
-        // ใช้ buildRollEmbed เพื่อให้ได้ roll card canvas เหมือนปกติ
-        // แต่ต้องบันทึก score ก่อน โดยใช้ผลจาก parsed ที่ทอยแล้ว
+        // ทอยครั้งเดียว แล้วสร้าง roll card จากผลนั้นโดยตรง
         const rollResult = rollDiceNotation(inputNotation);
         if (!rollResult) { await msg.reply('❌ เกิดข้อผิดพลาดครับ'); return; }
         const freshPlayer = getRacePlayer(userId);
         const newScore = (freshPlayer?.score || 0) + rollResult.total;
         updateRacePlayer(userId, { score: newScore, last_roll: JSON.stringify(rollResult), has_rolled: 1 });
-        // แสดง roll card ปกติ
-        const result = await buildRollEmbed(parsed, parsed.tokens, username, userId);
-        await msg.reply(result);
-        // แสดง score summary
+        // สร้าง roll card โดยใช้ผลที่ทอยไปแล้ว ไม่ทอยใหม่
+        const p2 = getPlayer(userId);
+        const bundleKey2 = p2?.equipped_bundle || 'default';
+        const breakdown2 = rollResult.display;
+        const buffer2 = await generateRollCard(username, inputNotation, rollResult.total, breakdown2, bundleKey2);
+        const attachment2 = { attachment: buffer2, name: 'roll.png' };
+        const bundle2 = getBundle(bundleKey2);
+        const color2 = bundle2 ? parseInt(bundle2.emblemColor.slice(1), 16) : 0x444444;
+        const { EmbedBuilder: EB3 } = await import('discord.js');
+        const rollEmbed2 = new EB3().setColor(color2).setImage('attachment://roll.png');
+        await msg.reply({ embeds: [rollEmbed2], files: [attachment2] });
+        // score summary
         const colorLabel = rollColorMsg === 'gold' ? '🟡 ทอง' : '⚪ ขาว';
         await msg.channel.send('📊 **' + username + '** | สาย ' + racePlayer.run_style.toUpperCase() + ' ' + colorLabel + ' | คะแนนรวม: **' + newScore.toLocaleString() + '** แต้ม | ' + zoneStatus).catch(()=>{});
       } catch(e) { console.error(e); }
