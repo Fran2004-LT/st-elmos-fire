@@ -2138,18 +2138,19 @@ client.on('messageCreate', async msg => {
       }
 
       try {
+        // ใช้ buildRollEmbed เพื่อให้ได้ roll card canvas เหมือนปกติ
+        // แต่ต้องบันทึก score ก่อน โดยใช้ผลจาก parsed ที่ทอยแล้ว
         const rollResult = rollDiceNotation(inputNotation);
         if (!rollResult) { await msg.reply('❌ เกิดข้อผิดพลาดครับ'); return; }
         const freshPlayer = getRacePlayer(userId);
         const newScore = (freshPlayer?.score || 0) + rollResult.total;
         updateRacePlayer(userId, { score: newScore, last_roll: JSON.stringify(rollResult), has_rolled: 1 });
+        // แสดง roll card ปกติ
+        const result = await buildRollEmbed(parsed, parsed.tokens, username, userId);
+        await msg.reply(result);
+        // แสดง score summary
         const colorLabel = rollColorMsg === 'gold' ? '🟡 ทอง' : '⚪ ขาว';
-        const { EmbedBuilder: EB2 } = await import('discord.js');
-        const rollEmbed = new EB2()
-          .setColor(rollColorMsg === 'gold' ? 0xD4AF37 : 0xffffff)
-          .setDescription('🎲 **' + username + '** | ' + colorLabel + ' | `' + inputNotation + '` → **' + rollResult.display + '**')
-          .setFooter({ text: 'สาย ' + racePlayer.run_style.toUpperCase() + ' | คะแนนรวม: ' + newScore.toLocaleString() + ' แต้ม | ' + zoneStatus });
-        await msg.reply({ embeds: [rollEmbed] });
+        await msg.channel.send('📊 **' + username + '** | สาย ' + racePlayer.run_style.toUpperCase() + ' ' + colorLabel + ' | คะแนนรวม: **' + newScore.toLocaleString() + '** แต้ม | ' + zoneStatus).catch(()=>{});
       } catch(e) { console.error(e); }
       return;
     }
