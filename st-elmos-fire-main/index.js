@@ -2062,6 +2062,27 @@ const commands = [
         .setName('gift')
         .setDescription('[Staff] บวก +1 reroll ติดตัวให้ผู้เล่น')
         .addUserOption(o => o.setName('player').setDescription('ผู้เล่น').setRequired(true)))),
+
+  new SlashCommandBuilder().setName('train').setDescription('ระบบฝึกซ้อม')
+    .addSubcommand(s => s.setName('submit').setDescription('ส่งบทฝึก')
+      .addUserOption(o => o.setName('trainer').setDescription('เทรนเนอร์').setRequired(true))
+      .addStringOption(o => o.setName('horses').setDescription('mention สาวม้า').setRequired(true))
+      .addStringOption(o => o.setName('type').setDescription('ประเภท').setRequired(true).addChoices(
+        {name:'Reroll (คุยสนทนา)',value:'chat'},
+        {name:'Reroll (ฝึกคู่/กลุ่ม)',value:'group'},
+        {name:'Safe (ฝึกคนเดียว)',value:'solo'},
+        {name:'ล้างเนินมรณะ',value:'hill'}
+      ))
+      .addChannelOption(o => o.setName('location').setDescription('channel ที่ฝึก').setRequired(true)))
+    .addSubcommand(s => s.setName('approve').setDescription('[Staff] อนุมัติบทฝึก')
+      .addUserOption(o => o.setName('horse').setDescription('สาวม้า').setRequired(true))
+      .addStringOption(o => o.setName('type').setDescription('ประเภท').setRequired(true).addChoices(
+        {name:'คุยสนทนา',value:'chat'},
+        {name:'ฝึกคู่/กลุ่ม',value:'group'},
+        {name:'ฝึกคนเดียว',value:'solo'},
+        {name:'ล้างเนินมรณะ',value:'hill'}
+      ))
+      .addUserOption(o => o.setName('trainer').setDescription('เทรนเนอร์').setRequired(false))),
 ].map(c => c.toJSON());
 
 async function deployCommands() {
