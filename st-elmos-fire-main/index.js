@@ -1559,6 +1559,27 @@ function clearRaceSession() {
   raceDb.exec(`DELETE FROM race_players; UPDATE race_session SET active=0, current_phase=1, current_turn=1, track='', distance='', grade='';`);
 }
 
+
+const raceCommands = [
+  new SlashCommandBuilder().setName('race').setDescription('ระบบการแข่ง')
+    .addSubcommand(s => s.setName('start').setDescription('[Staff] เปิด session')
+      .addStringOption(o => o.setName('track').setDescription('สนาม').setRequired(true).addChoices({name:'Nakayama',value:'nakayama'},{name:'Tokyo',value:'tokyo'},{name:'Kyoto',value:'kyoto'},{name:'Hanshin',value:'hanshin'},{name:'Chukyo',value:'chukyo'}))
+      .addStringOption(o => o.setName('distance').setDescription('ระยะทาง').setRequired(true).addChoices({name:'Sprint (8T)',value:'sprint'},{name:'Mile/Medium (12T)',value:'mile_medium'},{name:'Long (14T)',value:'long'}))
+      .addStringOption(o => o.setName('grade').setDescription('ระดับ').setRequired(true).addChoices({name:'Make Debut',value:'debut'},{name:'G3',value:'g3'},{name:'G2',value:'g2'},{name:'G1',value:'g1'})))
+    .addSubcommand(s => s.setName('register').setDescription('ลงทะเบียนสายวิ่ง')
+      .addStringOption(o => o.setName('style').setDescription('สาย').setRequired(true).addChoices({name:'Front',value:'front'},{name:'Pace',value:'pace'},{name:'Late',value:'late'},{name:'End',value:'end'})))
+    .addSubcommand(s => s.setName('roll').setDescription('[Staff] ทอยให้ผู้เล่น').addUserOption(o => o.setName('player').setDescription('ผู้เล่น').setRequired(true)))
+    .addSubcommand(s => s.setName('safe').setDescription('ใช้ Safe'))
+    .addSubcommand(s => s.setName('reroll').setDescription('ใช้ Reroll').addStringOption(o => o.setName('type').setDescription('ประเภท').setRequired(true).addChoices({name:'Reroll ติดตัว',value:'personal'},{name:'Reroll กิจกรรม',value:'activity'},{name:'Reroll เทรนเนอร์',value:'trainer'})))
+    .addSubcommand(s => s.setName('debuffskill').setDescription('ใช้ Debuff Skill').addUserOption(o => o.setName('target').setDescription('เป้าหมาย').setRequired(true)))
+    .addSubcommand(s => s.setName('allout').setDescription('All out'))
+    .addSubcommand(s => s.setName('zone').setDescription('เปิดโซน').addStringOption(o => o.setName('color').setDescription('สี').setRequired(true).addChoices({name:'ทอง',value:'gold'},{name:'ขาว',value:'white'})))
+    .addSubcommand(s => s.setName('endturn').setDescription('[Staff] จบเทิร์น'))
+    .addSubcommand(s => s.setName('endphase').setDescription('[Staff] จบเฟส'))
+    .addSubcommand(s => s.setName('end').setDescription('[Staff] จบการแข่ง'))
+    .addSubcommand(s => s.setName('score').setDescription('[Staff] ดูคะแนน')),
+];
+
 async function handleRace(interaction) {
   const sub = interaction.options.getSubcommand();
   const userId = interaction.user.id;
