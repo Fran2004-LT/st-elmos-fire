@@ -1463,7 +1463,18 @@ function getDiceNotation(style, phase, rollColor) {
 // เทิร์น 1 ของเฟส 1 ทุกคนทอยขาวเสมอ
 function getRollColor(player, allPlayers, session) {
   if (session.current_phase === 1 && session.current_turn === 1) return 'white';
-  const sorted = [...allPlayers].sort((a,b) => b.score - a.score);
+  // ใช้ snapshot คะแนน ณ ต้นเทิร์น ถ้ามี
+  let playersToCheck = allPlayers;
+  if (session.turn_snapshot) {
+    try {
+      const snap = JSON.parse(session.turn_snapshot);
+      playersToCheck = allPlayers.map(p => {
+        const s = snap.find(x => x.user_id === p.user_id);
+        return s ? { ...p, score: s.score } : p;
+      });
+    } catch(e) {}
+  }
+  const sorted = [...playersToCheck].sort((a,b) => b.score - a.score);
   const idx = sorted.findIndex(p => p.user_id === player.user_id);
   if (idx === -1) return 'white';
   const ahead  = idx > 0 ? sorted[idx-1] : null;
@@ -1529,7 +1540,8 @@ raceDb.exec(`
   CREATE TABLE IF NOT EXISTS race_session (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     track TEXT DEFAULT '', distance TEXT DEFAULT '', grade TEXT DEFAULT '',
-    current_phase INTEGER DEFAULT 1, current_turn INTEGER DEFAULT 1, active INTEGER DEFAULT 0
+    current_phase INTEGER DEFAULT 1, current_turn INTEGER DEFAULT 1, active INTEGER DEFAULT 0,
+    turn_snapshot TEXT DEFAULT ''
   );
   CREATE TABLE IF NOT EXISTS race_players (
     user_id TEXT PRIMARY KEY, username TEXT DEFAULT '', run_style TEXT DEFAULT '',
@@ -1717,12 +1729,14 @@ async function handleRace(interaction) {
     else if (type === 'activity') updatePlayer(userId, { inv_reroll: (mp.inv_reroll || 0) - 1 });
     else if (type === 'trainer') updatePlayer(userId, { trainer_reroll: (mp.trainer_reroll || 0) - 1 });
     // ทอยใหม่
-    const allPlayers = getAllRacePlayers();
-    const rollColor = getRollColor(player, allPlayers, session);
+    // อัพเดท score ชั่วคราวก่อน เพื่อคำนวณ White/Gold จากคะแนนล่าสุด
+    const scoreWithoutOld = lastRoll ? player.score - lastRoll.total : player.score;
+    // ดึง players ล่าสุดพร้อม score ชั่วคราว
+    const allPlayersTemp = getAllRacePlayers().map(p => p.user_id === userId ? {...p, score: scoreWithoutOld} : p);
+    const rollColor = getRollColor({...player, score: scoreWithoutOld}, allPlayersTemp, session);
     const notation = getDiceNotation(player.run_style, session.current_phase, rollColor);
     const newResult = rollDiceNotation(notation);
     if (!newResult) return interaction.reply({ content: '❌ เกิดข้อผิดพลาดครับ', flags: 64 });
-    const scoreWithoutOld = lastRoll ? player.score - lastRoll.total : player.score;
     const newScore = scoreWithoutOld + newResult.total;
     updateRacePlayer(userId, { last_roll: JSON.stringify(newResult), score: newScore, has_rolled: 1 });
     const typeLabel = { personal:'Main Reroll', activity:'One-use Reroll', trainer:'Reroll Trainer' }[type];
@@ -1814,6 +1828,9 @@ async function handleRace(interaction) {
     // Reset has_rolled และ zone_active ทุกคน
     const allPlayers = getAllRacePlayers();
     for (const p of allPlayers) updateRacePlayer(p.user_id, { has_rolled: 0, zone_active: 0 });
+    // Snapshot คะแนน ณ ต้นเทิร์นใหม่ เพื่อใช้คำนวณ White/Gold
+    const snapshot = JSON.stringify(allPlayers.map(p => ({ user_id: p.user_id, score: p.score })));
+    updateRaceSession({ turn_snapshot: snapshot });
     if (nextTurn > turnsInPhase) {
       updateRaceSession({ current_turn: nextTurn });
       return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xEB5757)
@@ -2140,7 +2157,7 @@ client.on('messageCreate', async msg => {
       const expectedNotation = getDiceNotation(racePlayer.run_style, session.current_phase, rollColorMsg);
       const inputNotation = raw.trim().toLowerCase().replace(/\s/g, '');
       const isCorrect = inputNotation === expectedNotation.toLowerCase();
-      const zoneStatus = racePlayer.zone_active ? '✨ อยู่ในโซน — เลือกผลได้เอง' : '⚪ ไม่ได้อยู่ในโซน';
+      const zoneStatus = '⚪ ไม่ได้อยู่ในโซน'; // zone_active แยกต่างหากจาก white/gold
 
       // เช็คว่าทอยไปแล้วในเทิร์นนี้ไหม
       if (racePlayer.has_rolled) {
