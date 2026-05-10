@@ -1586,6 +1586,8 @@ const raceCommands = [
     .addSubcommand(s => s.setName('reroll').setDescription('ใช้ Reroll').addStringOption(o => o.setName('type').setDescription('ประเภท').setRequired(true).addChoices({name:'Reroll ติดตัว',value:'personal'},{name:'Reroll กิจกรรม',value:'activity'},{name:'Reroll เทรนเนอร์',value:'trainer'})))
     .addSubcommand(s => s.setName('debuffskill').setDescription('ใช้ Debuff Skill').addUserOption(o => o.setName('target').setDescription('เป้าหมาย').setRequired(true)))
     .addSubcommand(s => s.setName('allout').setDescription('All out'))
+    .addSubcommand(s => s.setName('slowdown').setDescription('ลดแต้มตัวเอง (ไม่เกิน 10)')
+      .addIntegerOption(o => o.setName('amount').setDescription('จำนวนที่จะลด (1-10)').setRequired(true).setMinValue(1).setMaxValue(10)))
     .addSubcommand(s => s.setName('zone').setDescription('เปิดโซน').addStringOption(o => o.setName('color').setDescription('สี').setRequired(true).addChoices({name:'ทอง',value:'gold'},{name:'ขาว',value:'white'})))
     .addSubcommand(s => s.setName('endturn').setDescription('[Staff] จบเทิร์น'))
     .addSubcommand(s => s.setName('endphase').setDescription('[Staff] จบเฟส'))
@@ -1630,12 +1632,16 @@ async function handleRace(interaction) {
     const existing = getRacePlayer(userId);
     if (existing) {
       raceDb.prepare(`UPDATE race_players SET run_style=?, score=0, race_safes=?, one_use_safes=?,
-        hill_debuff=0, last_roll='', has_rolled=0, all_out_count=0 WHERE user_id=?`)
+        hill_debuff=0, last_roll='', has_rolled=0, all_out_count=0, zone_active=0 WHERE user_id=?`)
         .run(style, g.safes, oneUseSafe, userId);
     } else {
       raceDb.prepare(`INSERT INTO race_players (user_id, username, run_style, race_safes, one_use_safes)
         VALUES (?,?,?,?,?)`).run(userId, interaction.user.username, style, g.safes, oneUseSafe);
     }
+    // อัพเดท snapshot ทุกครั้งที่มีคนลงทะเบียน
+    const snapPlayers = getAllRacePlayers();
+    const snapData = JSON.stringify(snapPlayers.map(p => ({ user_id: p.user_id, score: p.score })));
+    updateRaceSession({ turn_snapshot: snapData });
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57f287)
       .setDescription(`✅ **${interaction.user.username}** ลงทะเบียนสาย **${style.toUpperCase()}** แล้วครับ\n🛡️ Safe: ${g.safes} (ติดตัว) + ${oneUseSafe} (กิจกรรม)`)], flags: 64 });
   }
@@ -1806,6 +1812,27 @@ async function handleRace(interaction) {
   }
 
   // ─── ZONE ───
+  if (sub === 'slowdown') {
+    if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
+    const player = getRacePlayer(userId);
+    if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
+    const amount = interaction.options.getInteger('amount');
+    const newScore = player.score - amount;
+    updateRacePlayer(userId, { score: newScore });
+    // อัพเดท snapshot ด้วย
+    const allAfter = getAllRacePlayers();
+    updateRaceSession({ turn_snapshot: JSON.stringify(allAfter.map(p => ({ user_id: p.user_id, score: p.score }))) });
+    // คำนวณ White/Gold หลัง slowdown
+    const rollColorAfter = getRollColor({...player, score: newScore}, allAfter, session);
+    const colorLabel = rollColorAfter === 'gold' ? '🟡 ทอง' : '⚪ ขาว';
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865F2)
+      .setTitle(`🐢 ${interaction.user.username} ลดความเร็ว -${amount} แต้ม`)
+      .addFields(
+        { name: '📈 คะแนนใหม่', value: `**${newScore.toLocaleString()}** แต้ม`, inline: true },
+        { name: '🎨 โรลเทิร์นนี้', value: colorLabel, inline: true },
+      )] });
+  }
+
   if (sub === 'zone') {
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const player = getRacePlayer(userId);
@@ -1854,7 +1881,9 @@ async function handleRace(interaction) {
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
     const allPlayers = getAllRacePlayers();
     for (const p of allPlayers) updateRacePlayer(p.user_id, { has_rolled: 0, zone_active: 0 });
-    updateRaceSession({ current_phase: session.current_phase + 1, current_turn: 1 });
+    // บันทึก snapshot คะแนน ณ ต้นเฟสใหม่
+    const snapshotEP = JSON.stringify(allPlayers.map(p => ({ user_id: p.user_id, score: p.score })));
+    updateRaceSession({ current_phase: session.current_phase + 1, current_turn: 1, turn_snapshot: snapshotEP });
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xD4AF37)
       .setTitle(`✅ จบเฟส ${session.current_phase}`)
       .setDescription(`เริ่มเฟส **${session.current_phase + 1}**`)] });
