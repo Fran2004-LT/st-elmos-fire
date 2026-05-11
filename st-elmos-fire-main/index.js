@@ -1463,24 +1463,16 @@ function getDiceNotation(style, phase, rollColor) {
 // เทิร์น 1 ของเฟส 1 ทุกคนทอยขาวเสมอ
 function getRollColor(player, allPlayers, session) {
   if (session.current_phase === 1 && session.current_turn === 1) return 'white';
-  // ใช้ snapshot คะแนน ณ ต้นเทิร์น ถ้ามี
-  let playersToCheck = allPlayers;
-  if (session.turn_snapshot) {
-    try {
-      const snap = JSON.parse(session.turn_snapshot);
-      playersToCheck = allPlayers.map(p => {
-        const s = snap.find(x => x.user_id === p.user_id);
-        return s ? { ...p, score: s.score } : p;
-      });
-    } catch(e) {}
-  }
-  const sorted = [...playersToCheck].sort((a,b) => b.score - a.score);
+  // ใช้คะแนน real-time เสมอ
+  const sorted = [...allPlayers].sort((a,b) => b.score - a.score);
   const idx = sorted.findIndex(p => p.user_id === player.user_id);
   if (idx === -1) return 'white';
+  // ใช้ score จาก playersToCheck (snapshot) ของ player เอง ไม่ใช่ real-time
+  const myScore = sorted[idx].score;
   const ahead  = idx > 0 ? sorted[idx-1] : null;
   const behind = idx < sorted.length-1 ? sorted[idx+1] : null;
-  const aheadDiff  = ahead  ? ahead.score  - player.score : Infinity;
-  const behindDiff = behind ? player.score - behind.score : Infinity;
+  const aheadDiff  = ahead  ? ahead.score  - myScore : Infinity;
+  const behindDiff = behind ? myScore - behind.score : Infinity;
   if (aheadDiff <= 10 || behindDiff <= 10) return 'gold';
   return 'white';
 }
@@ -1819,17 +1811,23 @@ async function handleRace(interaction) {
     const amount = interaction.options.getInteger('amount');
     const newScore = player.score - amount;
     updateRacePlayer(userId, { score: newScore });
-    // อัพเดท snapshot ด้วย
+    // คำนวณ White/Gold จาก real-time หลัง slowdown
     const allAfter = getAllRacePlayers();
-    updateRaceSession({ turn_snapshot: JSON.stringify(allAfter.map(p => ({ user_id: p.user_id, score: p.score }))) });
-    // คำนวณ White/Gold หลัง slowdown
-    const rollColorAfter = getRollColor({...player, score: newScore}, allAfter, session);
+    const updatedPlayer = allAfter.find(p => p.user_id === userId);
+    const rollColorAfter = getRollColor(updatedPlayer, allAfter, session);
     const colorLabel = rollColorAfter === 'gold' ? '🟡 ทอง' : '⚪ ขาว';
+    // แสดงสถานะทุกคนหลัง slowdown
+    const allStatus = [...allAfter].sort((a,b) => b.score - a.score).map(p => {
+      const c = getRollColor(p, allAfter, session);
+      return `${c === 'gold' ? '🟡' : '⚪'} **${p.username}** (${p.run_style.toUpperCase()}) — ${p.score} แต้ม`;
+    }).join('
+');
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865F2)
       .setTitle(`🐢 ${interaction.user.username} ลดความเร็ว -${amount} แต้ม`)
       .addFields(
         { name: '📈 คะแนนใหม่', value: `**${newScore.toLocaleString()}** แต้ม`, inline: true },
-        { name: '🎨 โรลเทิร์นนี้', value: colorLabel, inline: true },
+        { name: '🎨 สีของคุณ', value: colorLabel, inline: true },
+        { name: '📊 สถานะปัจจุบัน', value: allStatus },
       )] });
   }
 
