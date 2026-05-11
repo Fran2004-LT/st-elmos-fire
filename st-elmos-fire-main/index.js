@@ -1463,11 +1463,20 @@ function getDiceNotation(style, phase, rollColor) {
 // เทิร์น 1 ของเฟส 1 ทุกคนทอยขาวเสมอ
 function getRollColor(player, allPlayers, session) {
   if (session.current_phase === 1 && session.current_turn === 1) return 'white';
-  // ใช้คะแนน real-time เสมอ
-  const sorted = [...allPlayers].sort((a,b) => b.score - a.score);
+  // ใช้ snapshot คะแนน ณ ต้นเทิร์น เพื่อไม่ให้ debuff/reroll กลางเทิร์นรบกวน
+  let playersToCheck = allPlayers;
+  if (session.turn_snapshot) {
+    try {
+      const snap = JSON.parse(session.turn_snapshot);
+      playersToCheck = allPlayers.map(p => {
+        const s = snap.find(x => x.user_id === p.user_id);
+        return s ? { ...p, score: s.score } : p;
+      });
+    } catch(e) {}
+  }
+  const sorted = [...playersToCheck].sort((a,b) => b.score - a.score);
   const idx = sorted.findIndex(p => p.user_id === player.user_id);
   if (idx === -1) return 'white';
-  // ใช้ score จาก playersToCheck (snapshot) ของ player เอง ไม่ใช่ real-time
   const myScore = sorted[idx].score;
   const ahead  = idx > 0 ? sorted[idx-1] : null;
   const behind = idx < sorted.length-1 ? sorted[idx+1] : null;
