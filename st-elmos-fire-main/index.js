@@ -1820,8 +1820,7 @@ async function handleRace(interaction) {
     const allStatus = [...allAfter].sort((a,b) => b.score - a.score).map(p => {
       const c = getRollColor(p, allAfter, session);
       return `${c === 'gold' ? '🟡' : '⚪'} **${p.username}** (${p.run_style.toUpperCase()}) — ${p.score} แต้ม`;
-    }).join('
-');
+    }).join('\n');
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865F2)
       .setTitle(`🐢 ${interaction.user.username} ลดความเร็ว -${amount} แต้ม`)
       .addFields(
