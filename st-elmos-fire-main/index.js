@@ -1841,13 +1841,32 @@ async function handleRace(interaction) {
 
   if (sub === 'zone') {
     if (!session.active) return interaction.reply({ content: 'ยังไม่มี session ครับ', flags: 64 });
+    if (session.grade !== 'g1') return interaction.reply({ content: '❌ Zone ใช้ได้เฉพาะ G1 ครับ', flags: 64 });
     const player = getRacePlayer(userId);
     if (!player) return interaction.reply({ content: 'ยังไม่ได้ลงทะเบียนครับ', flags: 64 });
+    if (player.has_rolled) return interaction.reply({ content: '❌ ทอยไปแล้วในเทิร์นนี้ครับ', flags: 64 });
     const color = interaction.options.getString('color');
-    updateRacePlayer(userId, { zone_active: 1 });
+    // ทอย 2 ครั้งด้วย notation ของสีที่เลือก
+    const notation = getDiceNotation(player.run_style, session.current_phase, color);
+    const roll1 = rollDiceNotation(notation);
+    const roll2 = rollDiceNotation(notation);
+    if (!roll1 || !roll2) return interaction.reply({ content: '❌ เกิดข้อผิดพลาดครับ', flags: 64 });
+    // เลือกผลที่ดีกว่า
+    const best = roll1.total >= roll2.total ? roll1 : roll2;
+    const worst = roll1.total >= roll2.total ? roll2 : roll1;
+    const freshPlayer = getRacePlayer(userId);
+    const newScore = (freshPlayer?.score || 0) + best.total;
+    updateRacePlayer(userId, { score: newScore, last_roll: JSON.stringify(best), has_rolled: 1 });
+    const colorEmoji = color === 'gold' ? '🟡' : '⚪';
     return interaction.reply({ embeds: [new EmbedBuilder().setColor(color === 'gold' ? 0xD4AF37 : 0xaaaaaa)
-      .setTitle(`✨ ${interaction.user.username} เปิดโซน${color === 'gold' ? 'ทอง' : 'ขาว'}!`)
-      .setDescription(`สามารถเลือกผลลัพธ์ที่ต้องการได้ครับ`)] });
+      .setTitle(`✨ ${interaction.user.username} ใช้โซน${color === 'gold' ? 'ทอง' : 'ขาว'}!`)
+      .addFields(
+        { name: `${colorEmoji} ทอยครั้งที่ 1`, value: `**${roll1.display}**`, inline: true },
+        { name: `${colorEmoji} ทอยครั้งที่ 2`, value: `**${roll2.display}**`, inline: true },
+        { name: '✅ ผลที่ใช้', value: `**${best.display}**`, inline: true },
+        { name: '❌ ผลที่ทิ้ง', value: `~~${worst.display}~~`, inline: true },
+        { name: '📈 คะแนนรวม', value: `**${newScore.toLocaleString()}** แต้ม`, inline: true },
+      )] });
   }
 
   // ─── ENDTURN ───
@@ -2231,7 +2250,7 @@ client.on('messageCreate', async msg => {
         await msg.reply({ embeds: [rollEmbed2], files: [attachment2] });
         // score summary
         const colorLabel = rollColorMsg === 'gold' ? '🟡 ทอง' : '⚪ ขาว';
-        await msg.channel.send('📊 **' + username + '** | สาย ' + racePlayer.run_style.toUpperCase() + ' ' + colorLabel + ' | คะแนนรวม: **' + newScore.toLocaleString() + '** แต้ม | ' + zoneStatus).catch(()=>{});
+        await msg.channel.send('📊 **' + username + '** | สาย ' + racePlayer.run_style.toUpperCase() + ' | คะแนนรวม: **' + newScore.toLocaleString() + '** แต้ม').catch(()=>{});
       } catch(e) { console.error(e); }
       return;
     }
